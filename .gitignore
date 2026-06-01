@@ -1,3 +1,16 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Local editor/agent workspace files
+.kiro/
+.vscode/
+.codex/
+.claude/
+.mcp.json
+CLAUDE.md
+
+# Local IDE/user state
+*.user
+*.suo
+*.csproj.user

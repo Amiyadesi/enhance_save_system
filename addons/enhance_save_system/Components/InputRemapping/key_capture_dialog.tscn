@@ -1,0 +1,35 @@
+[gd_scene load_steps=2 format=3 uid="uid://bst7fm6o8miwr"]
+
+[ext_resource type="Script" uid="uid://bic18e8v01ahi" path="res://addons/enhance_save_system/Components/InputRemapping/key_capture_dialog.gd" id="1_capture"]
+
+[node name="KeyCaptureDialog" type="AcceptDialog"]
+title = "按键设置"
+exclusive = true
+unresizable = true
+min_size = Vector2i(320, 120)
+ok_button_text = "取消"
+script = ExtResource("1_capture")
+
+[node name="PromptLabel" type="Label" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 60)
+offset_right = 280.0
+offset_bottom = 60.0
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="ConflictDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "按键冲突"
+exclusive = true
+ok_button_text = "覆盖"
+cancel_button_text = "取消"
+
+[node name="ConflictLabel" type="Label" parent="ConflictDialog"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(280, 96)
+offset_right = 280.0
+offset_bottom = 96.0
+vertical_alignment = 1
+autowrap_mode = 3

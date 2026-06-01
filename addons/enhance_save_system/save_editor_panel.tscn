@@ -1,0 +1,68 @@
+[gd_scene format=3]
+
+[node name="SaveEditorPanel" type="VBoxContainer"]
+custom_minimum_size = Vector2(0, 180)
+
+[node name="Toolbar" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="RefreshButton" type="Button" parent="Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "刷新"
+
+[node name="ExportButton" type="Button" parent="Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "导出选中"
+
+[node name="ImportButton" type="Button" parent="Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "导入到选中"
+
+[node name="DeleteButton" type="Button" parent="Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "删除选中"
+
+[node name="ToolbarSpacer" type="Control" parent="Toolbar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StatusLabel" type="Label" parent="Toolbar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "就绪"
+
+[node name="SlotTree" type="Tree" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+columns = 8
+column_titles_visible = true
+
+[node name="ExportDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "导出存档"
+size = Vector2i(700, 450)
+min_size = Vector2i(560, 360)
+file_mode = 4
+access = 2
+filters = PackedStringArray("*.json ; 存档文件", "*.* ; 所有文件")
+use_native_dialog = true
+
+[node name="ImportDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "导入存档"
+size = Vector2i(700, 450)
+min_size = Vector2i(560, 360)
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.json ; 存档文件", "*.* ; 所有文件")
+use_native_dialog = true
+
+[node name="DeleteConfirmDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "确认删除"

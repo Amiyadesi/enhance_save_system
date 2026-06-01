@@ -1,6 +1,7 @@
-[gd_scene format=3 uid="uid://cre0p744n82p7"]
+[gd_scene load_steps=3 format=3 uid="uid://cre0p744n82p7"]
 
 [ext_resource type="Script" uid="uid://dcxcd6csn2nhf" path="res://addons/enhance_save_system/Components/InputRemapping/keybinding_ui.gd" id="1_keybindui"]
+[ext_resource type="PackedScene" path="res://addons/enhance_save_system/Components/InputRemapping/key_capture_dialog.tscn" id="2_capture"]
 
 [node name="KeybindingUI" type="Control" unique_id=1437016358]
 layout_mode = 3
@@ -10,6 +11,10 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_keybindui")
+action_filter = ["dev_console_toggle"]
+
+[node name="KeyCaptureDialog" parent="." unique_id=1287306450 instance=ExtResource("2_capture")]
+unique_name_in_owner = true
 
 [node name="Layout" type="VBoxContainer" parent="." unique_id=1938018712]
 layout_mode = 1

@@ -44,25 +44,39 @@ var session_history: Array = []
 ## 自定义统计（可扩展，key → int/float/bool）
 var custom: Dictionary = {}
 
+## 是否正常退出（true = 正常退出，false = 崩溃/强杀/断电）
+## 每次启动时读取，若为 false 则触发崩溃回归对话
+## 正常退出路径写 true，启动时读取后立即重置为 false
+var clean_exit: bool = true
+var _previous_clean_exit: bool = true
+var _session_tracking_started: bool = false
+
 
 # 彩蛋触发记录（egg_id → true）
 var _triggered_eggs: Dictionary = {}
 
+# Registers the latest stats module instance and hooks global-load session tracking.
 func _init() -> void:
 	instance = self
 	# 自动在全局存档读取后记录本次会话开始（以便获取上次退出时间）
-	if typeof(SaveSystem) != TYPE_NIL and SaveSystem.has_signal("global_loaded"):
-		SaveSystem.global_loaded.connect(_on_global_loaded)
-	
+	var save_system := _get_save_system()
+	if save_system != null and save_system.has_signal("global_loaded"):
+		save_system.global_loaded.connect(_on_global_loaded)
+
 
 # ──────────────────────────────────────────────
 # ISaveModule 接口
 # ──────────────────────────────────────────────
 
-func get_module_key() -> String: return "stats"
+# Returns the stable global-save key for play statistics.
+func get_module_key() -> String:
+	return "stats"
 
-func is_global() -> bool: return true
+# Stores statistics globally because they span all save slots.
+func is_global() -> bool:
+	return true
 
+# Captures cumulative stats, session history, egg markers, and exit state.
 func collect_data() -> Dictionary:
 	return {
 		"total_play_time"  : total_play_time,
@@ -73,8 +87,10 @@ func collect_data() -> Dictionary:
 		"session_history"    : session_history.duplicate(true),
 		"custom"           : custom.duplicate(true),
 		"triggered_eggs"   : _triggered_eggs.duplicate(true),
+		"clean_exit"       : clean_exit,
 	}
 
+# Applies persisted stats and records the previous session's exit state.
 func apply_data(data: Dictionary) -> void:
 	total_play_time   = float(data.get("total_play_time",   0.0))
 	total_play_count  = int(data.get("total_play_count",    0))
@@ -84,7 +100,12 @@ func apply_data(data: Dictionary) -> void:
 	session_history    = (data.get("session_history", []) as Array).duplicate(true)
 	custom            = (data.get("custom",          {}) as Dictionary).duplicate(true)
 	_triggered_eggs   = (data.get("triggered_eggs",  {}) as Dictionary).duplicate(true)
+	# 读取上次退出状态，读取后立即标记为"未正常退出"（等待本次正常退出时再写 true）
+	clean_exit        = _is_truthy(data.get("clean_exit", true))
+	_previous_clean_exit = clean_exit
+	_session_tracking_started = false
 
+# Records a new playthrough start in cumulative stats.
 func on_new_game() -> void:
 	total_play_count += 1
 	if first_played_at == 0:
@@ -97,7 +118,6 @@ func on_new_game() -> void:
 ## 每帧调用以累计游玩时长
 func tick(delta: float) -> void:
 	total_play_time += delta
-	_check_time_milestones()
 
 ## 记录本次游戏启动（每次程序启动或进入主菜单时触发）
 func _record_session_start() -> void:
@@ -111,16 +131,20 @@ func _record_session_start() -> void:
 	# 记录会话开始，稍后会话结束时补全 end 时间
 	session_history.append({"start": now, "end": 0})
 
-func _on_global_loaded(ok: bool) -> void:
-	# 仅在读取成功后记录启动时间，确保上次退出时间已正确恢复
-	if ok:
-		_record_session_start()
+# Starts a session-tracking pass after global stats load.
+func _on_global_loaded(_ok: bool) -> void:
+	_record_session_start()
+	_begin_session_tracking()
 
+# Records clean shutdown state and asks SaveSystem to persist it.
 func on_win_closed() -> void:
 	# 在程序退出时自动记录结束并保存全局数据
 	_record_session_end()
-	if typeof(SaveSystem) != TYPE_NIL and SaveSystem.has_method("save_global"):
-		SaveSystem.save_global()
+	# 标记为正常退出
+	clean_exit = true
+	var save_system := _get_save_system()
+	if save_system != null and save_system.has_method("save_global"):
+		save_system.call("save_global")
 
 ## 记录本次游戏退出（退出前调用一次）
 func _record_session_end() -> void:
@@ -133,11 +157,30 @@ func _record_session_end() -> void:
 			last["end"] = now
 			session_history[idx] = last
 
+# Reports whether the previous saved session ended unclearly.
+func had_unclean_exit() -> bool:
+	return not _previous_clean_exit
+
+
+# Reports the previous saved session's clean-exit flag.
+func was_previous_clean_exit() -> bool:
+	return _previous_clean_exit
+
 ## 获取距离上次退出过去的秒数；若无记录则返回 -1
 func get_seconds_since_last_exit() -> float:
 	if last_session_end == 0:
 		return -1
 	return float(Time.get_unix_time_from_system() - last_session_end)
+
+# Marks this running session as not cleanly closed until shutdown proves otherwise.
+func _begin_session_tracking() -> void:
+	if _session_tracking_started:
+		return
+	_session_tracking_started = true
+	clean_exit = false
+	var save_system := _get_save_system()
+	if save_system != null and save_system.has_method("save_global"):
+		save_system.call("save_global")
 
 ## 递增自定义计数器
 func increment(key: String, amount: int = 1) -> void:
@@ -156,18 +199,31 @@ func trigger_egg(egg_id: String) -> bool:
 func has_egg(egg_id: String) -> bool:
 	return _triggered_eggs.has(egg_id)
 
+
+# Coerces common scalar values to bool for persisted flags.
+func _is_truthy(value: Variant) -> bool:
+	if value is bool:
+		return value
+	if value is int:
+		return value != 0
+	if value is float:
+		return not is_zero_approx(value)
+	if value is String:
+		var trimmed := String(value).strip_edges().to_lower()
+		return trimmed in ["true", "1", "yes", "on"]
+	return false
+
 ## 获取已触发的所有彩蛋 ID
 func get_all_eggs() -> Array:
 	return _triggered_eggs.keys()
 
-# ──────────────────────────────────────────────
-# 内部：时长里程碑
-# ──────────────────────────────────────────────
-const _TIME_MILESTONES := [60.0, 300.0, 1800.0, 3600.0, 18000.0]   # 1m, 5m, 30m, 1h, 5h
-var _reached_milestones: Dictionary = {}
 
-func _check_time_milestones() -> void:
-	for m: float in _TIME_MILESTONES:
-		if not _reached_milestones.has(m) and total_play_time >= m:
-			_reached_milestones[m] = true
-			milestone_reached.emit("play_time_seconds", m)
+# Finds the SaveSystem autoload when running inside a SceneTree.
+func _get_save_system() -> Node:
+	var main_loop := Engine.get_main_loop()
+	if not (main_loop is SceneTree):
+		return null
+	var root := (main_loop as SceneTree).root
+	if root == null:
+		return null
+	return root.get_node_or_null("SaveSystem")

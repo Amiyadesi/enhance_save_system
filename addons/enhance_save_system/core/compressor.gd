@@ -73,6 +73,7 @@ static func mode_from_string(s: String) -> Mode:
 # 内部工具
 # ──────────────────────────────────────────────
 
+## Maps the plugin-facing compression enum to Godot's FileAccess mode enum.
 static func _to_godot_mode(mode: Mode) -> FileAccess.CompressionMode:
 	match mode:
 		Mode.DEFLATE: return FileAccess.COMPRESSION_DEFLATE

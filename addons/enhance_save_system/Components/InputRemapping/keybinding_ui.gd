@@ -4,6 +4,7 @@ extends Control
 ##
 ## 场景结构（keybinding_ui.tscn）：
 ##   Control (KeybindingUI)
+##   ├── KeyCaptureDialog [unique_name]
 ##   └── Layout (VBoxContainer)
 ##       ├── Header (HBoxContainer)
 ##       │   ├── TitleLabel   (Label)
@@ -35,47 +36,71 @@ extends Control
 # ──────────────────────────────────────────────
 @onready var _rows_container: VBoxContainer = %RowsContainer
 @onready var _reset_btn: Button             = %ResetButton
+@onready var _capture_dialog: KeyCaptureDialog = %KeyCaptureDialog
 
-var _capture_dialog: KeyCaptureDialog
 var _rows: Array[KeybindingRow] = []
 
 # ──────────────────────────────────────────────
 # 生命周期
 # ──────────────────────────────────────────────
 
+# Wires authored controls and builds the visible action rows.
 func _ready() -> void:
 	_reset_btn.pressed.connect(_on_reset_pressed)
-
-	# 共享弹窗：挂到街景根避免被 ScrollContainer 截断
-	_capture_dialog = KeyCaptureDialog.new()
-	add_child(_capture_dialog)
-
 	_build_rows()
-
-	var km := _get_module()
-	if km:
-		km.bindings_changed.connect(_on_bindings_changed)
+	_connect_keybinding_module()
 
 # ──────────────────────────────────────────────
 # 行构建
 # ──────────────────────────────────────────────
 
+# Rebuilds the action row list from the current InputMap.
 func _build_rows() -> void:
-	for child in _rows_container.get_children():
-		child.queue_free()
-	_rows.clear()
+	_clear_rows()
 
 	if row_scene == null:
 		push_error("KeybindingUI: row_scene 未设置")
 		return
 
 	for action in _get_actions_to_show():
-		var row: KeybindingRow = row_scene.instantiate()
-		_rows_container.add_child(row)
-		row.setup(action, label_map.get(action, ""), _capture_dialog)
-		row.binding_changed.connect(_on_row_binding_changed)
-		_rows.append(row)
+		var row := _create_action_row(action)
+		if row == null:
+			return
+		_register_row(row, action)
 
+
+# Removes existing authored row instances before rebuilding from InputMap data.
+func _clear_rows() -> void:
+	for child in _rows_container.get_children():
+		child.queue_free()
+	_rows.clear()
+
+
+# Instantiates one authored row scene for a single InputMap action.
+func _create_action_row(action: String) -> KeybindingRow:
+	var row := row_scene.instantiate() as KeybindingRow
+	if row == null:
+		push_error("KeybindingUI: row_scene 根节点必须是 KeybindingRow，action=%s" % action)
+		return null
+	return row
+
+
+# Attaches one row instance and wires its data-change callback.
+func _register_row(row: KeybindingRow, action: String) -> void:
+	_rows_container.add_child(row)
+	row.setup(action, label_map.get(action, ""), _capture_dialog)
+	row.binding_changed.connect(_on_row_binding_changed)
+	_rows.append(row)
+
+
+# Subscribes to SaveSystem keybinding broadcasts when the module is present.
+func _connect_keybinding_module() -> void:
+	var km := _get_module()
+	if km:
+		km.bindings_changed.connect(_on_bindings_changed)
+
+
+# Returns visible non-UI InputMap actions after applying the hide filter.
 func _get_actions_to_show() -> PackedStringArray:
 	var result: PackedStringArray = []
 	var km := _get_module()
@@ -96,6 +121,7 @@ func _get_actions_to_show() -> PackedStringArray:
 # 刷新所有行显示
 # ──────────────────────────────────────────────
 
+# Refreshes every row after InputMap or module state changes.
 func refresh_all() -> void:
 	for row in _rows:
 		if is_instance_valid(row):
@@ -105,6 +131,7 @@ func refresh_all() -> void:
 # 信号回调
 # ──────────────────────────────────────────────
 
+# Restores default bindings and refreshes all rows.
 func _on_reset_pressed() -> void:
 	var km := _get_module()
 	if km:
@@ -116,9 +143,13 @@ func _on_reset_pressed() -> void:
 		InputMap.load_from_project_settings()
 	refresh_all()
 
+
+# Refreshes row labels when the keybinding module broadcasts changes.
 func _on_bindings_changed() -> void:
 	refresh_all()
 
+
+# Extension hook for subclasses that need per-row change handling.
 func _on_row_binding_changed(_action: String, _ev: InputEvent) -> void:
 	pass  # 可在子类中扩展
 
@@ -126,6 +157,7 @@ func _on_row_binding_changed(_action: String, _ev: InputEvent) -> void:
 # 内部辅助
 # ──────────────────────────────────────────────
 
+# Finds the keybinding module from the SaveSystem autoload when available.
 static func _get_module() -> KeybindingModule:
 	var tree := Engine.get_main_loop() as SceneTree
 	if not tree:
@@ -135,6 +167,8 @@ static func _get_module() -> KeybindingModule:
 		return ss.get_module("keybindings") as KeybindingModule
 	return null
 
+
+# Finds the SaveSystem autoload for persisting edited bindings.
 static func _get_save_system() -> Node:
 	var tree := Engine.get_main_loop() as SceneTree
 	if not tree:

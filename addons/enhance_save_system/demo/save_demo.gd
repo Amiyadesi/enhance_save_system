@@ -59,7 +59,7 @@ func _ready() -> void:
 	player.hp       = 80
 	player.level    = 3
 	player.gold     = 250
-	player.scene_path = "res://levels/level_02.tscn"
+	player.scene_path = "res://addons/enhance_save_system/demo/example_level_02.tscn"
 	player.position = Vector2(128.0, 256.0)
 	player.add_item("sword_01")
 	player.add_item("potion_hp", 5)

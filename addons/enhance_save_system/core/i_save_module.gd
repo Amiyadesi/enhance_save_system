@@ -28,6 +28,7 @@ extends RefCounted
 # 构造保护：防止直接实例化
 # ──────────────────────────────────────────────
 
+## Allows subclasses to initialize without base-class side effects.
 func _init() -> void:
 	pass
 

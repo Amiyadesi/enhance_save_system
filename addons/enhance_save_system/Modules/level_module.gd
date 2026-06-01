@@ -25,6 +25,7 @@ var _levels: Dictionary = {}
 ## 当前加载/激活的关卡 ID
 var current_level_id: String = ""
 
+# Registers the latest level module instance for save-system callbacks.
 func _init() -> void:
 	instance = self
 
@@ -32,26 +33,34 @@ func _init() -> void:
 # ISaveModule 接口
 # ──────────────────────────────────────────────
 
-func get_module_key() -> String: return "level"
+# Returns the stable slot-save key for level progress.
+func get_module_key() -> String:
+	return "level"
 
-func is_global() -> bool: return false
+# Stores level progress in slot saves because it belongs to one playthrough.
+func is_global() -> bool:
+	return false
 
+# Captures all level records and the active level id for serialization.
 func collect_data() -> Dictionary:
 	return {
 		"levels":           _levels.duplicate(true),
 		"current_level_id": current_level_id,
 	}
 
+# Applies persisted level records and active level id.
 func apply_data(data: Dictionary) -> void:
 	_levels           = (data.get("levels", {}) as Dictionary).duplicate(true)
 	current_level_id  = str(data.get("current_level_id", ""))
 
+# Provides the first-run payload for a fresh save slot.
 func get_default_data() -> Dictionary:
 	return {
 		"levels":           {},
 		"current_level_id": "",
 	}
 
+# Resets level progress for a new game.
 func on_new_game() -> void:
 	_levels = {}
 	current_level_id = ""
@@ -107,6 +116,7 @@ func get_level_record(level_id: String) -> Dictionary:
 # 内部辅助
 # ──────────────────────────────────────────────
 
+# Returns an existing level record or creates the default record shape.
 func _get_or_create(level_id: String) -> Dictionary:
 	if not _levels.has(level_id):
 		_levels[level_id] = {

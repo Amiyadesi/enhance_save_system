@@ -21,11 +21,15 @@ var display_name: String = ""
 ## 共享弹窗（由 KeybindingUI 传入）
 var _capture_dialog: KeyCaptureDialog
 
+## 单个绑定按钮的 authored 场景
+@export var binding_button_scene: PackedScene = preload("res://addons/enhance_save_system/Components/InputRemapping/keybinding_event_button.tscn")
+
 @onready var _label: Label        = %ActionLabel
 @onready var _bindings_container: VBoxContainer = %BindingsContainer
 @onready var _add_button: Button  = %AddButton
 
 var _binding_buttons: Array[Button] = []
+var _pending_binding_index: int = -1
 
 # ──────────────────────────────────────────────
 # 公开 API
@@ -43,84 +47,143 @@ func setup(p_action: String, p_display: String, capture_dialog: KeyCaptureDialog
 ## 直接从 InputMap 读取当前绑定刷新按钮文字
 ## ⚠ 不依赖 SaveSystem，InputMap 全局随时可用，无初始化时序问题
 func refresh() -> void:
-	# 清空现有按钮
+	_clear_binding_buttons()
+	_refresh_bound_events()
+	if _binding_buttons.size() == 0:
+		_refresh_empty_binding()
+
+
+# Removes previous authored binding-button instances before a refresh.
+func _clear_binding_buttons() -> void:
 	for button in _binding_buttons:
 		if is_instance_valid(button):
 			button.queue_free()
 	_binding_buttons.clear()
-	
-	# 添加新按钮
-	if InputMap.has_action(action):
-		var events := InputMap.action_get_events(action)
-		for i in range(events.size()):
-			var button := Button.new()
-			button.text = ResourceSerializer.event_to_display_string(events[i])
-			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			button.pressed.connect(_create_binding_pressed_func(i))
-			_bindings_container.add_child(button)
-			_binding_buttons.append(button)
-	
-	# 如果没有绑定，显示默认文本
-	if _binding_buttons.size() == 0:
-		var button := Button.new()
-		button.text = "未绑定"
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.pressed.connect(_create_binding_pressed_func(-1))
-		_bindings_container.add_child(button)
-		_binding_buttons.append(button)
+
+
+# Adds one button for each currently registered InputMap event.
+func _refresh_bound_events() -> void:
+	if not InputMap.has_action(action):
+		return
+	var events := InputMap.action_get_events(action)
+	for i in range(events.size()):
+		_add_binding_button(ResourceSerializer.event_to_display_string(events[i]), i)
+
+
+# Adds the visible placeholder button when an action has no bindings.
+func _refresh_empty_binding() -> void:
+	_add_binding_button("未绑定", -1)
+
+
+# Instantiates, attaches, and tracks one authored binding button.
+func _add_binding_button(text: String, index: int) -> void:
+	var button := _create_binding_button(text, index)
+	if button == null:
+		return
+	_bindings_container.add_child(button)
+	_binding_buttons.append(button)
 
 # ──────────────────────────────────────────────
 # 内部
 # ──────────────────────────────────────────────
 
+# Instantiates one authored binding button and binds it to an event index.
+func _create_binding_button(text: String, index: int) -> Button:
+	if binding_button_scene == null:
+		push_error("KeybindingRow: binding_button_scene 未设置")
+		return null
+	var button := binding_button_scene.instantiate() as Button
+	if button == null:
+		push_error("KeybindingRow: binding_button_scene 根节点必须是 Button")
+		return null
+	button.text = text
+	button.pressed.connect(_create_binding_pressed_func(index))
+	return button
+
+
+# Wraps a binding index into a button callback.
 func _create_binding_pressed_func(index: int) -> Callable:
 	return func():
 		_on_binding_button_pressed(index)
 
+
+# Opens capture for a new binding entry.
 func _on_add_button_pressed() -> void:
 	_on_binding_button_pressed(-1)
 
+
+# Opens capture for an existing binding entry.
 func _on_binding_button_pressed(index: int) -> void:
 	if not is_instance_valid(_capture_dialog):
 		push_error("KeybindingRow: _capture_dialog 未设置")
 		return
-	# 断开旧连接（避免多次叠加）
+	_pending_binding_index = index
 	if _capture_dialog.key_captured.is_connected(_on_key_captured):
 		_capture_dialog.key_captured.disconnect(_on_key_captured)
-	_capture_dialog.key_captured.connect(func(event: InputEvent, captured_action: String):
-		_on_key_captured(event, captured_action, index)
-	, CONNECT_ONE_SHOT)
+	_capture_dialog.key_captured.connect(_on_key_captured, CONNECT_ONE_SHOT)
 	_capture_dialog.open_for(action, display_name)
 
-func _on_key_captured(event: InputEvent, captured_action: String, index: int) -> void:
+
+# Applies a captured event to the row action and refreshes display text.
+func _on_key_captured(event: InputEvent, captured_action: String) -> void:
 	if captured_action != action:
 		return
-	# 优先走模块（含信号广播）；无 SaveSystem 时降级直接操作 InputMap
-	var km := _get_keybinding_module()
-	if km:
-		if index == -1:
-			# 添加新绑定
-			km.add_action_event(action, event)
-		else:
-			# 修改现有绑定
-			km.rebind_action_event(action, index, event)
-		var ss := _get_save_system()
-		if ss and ss.has_method("save_global"):
-			ss.save_global()
-	else:
-		if InputMap.has_action(action):
-			if index == -1:
-				# 添加新绑定
-				InputMap.action_add_event(action, event)
-			else:
-				# 修改现有绑定
-				var old_events := InputMap.action_get_events(action)
-				if index < old_events.size():
-					InputMap.action_erase_event(action, old_events[index])
-				InputMap.action_add_event(action, event)
+	var applied := _apply_captured_event(event)
+	_pending_binding_index = -1
+	if not applied:
+		return
 	refresh()
 	binding_changed.emit(action, event)
 
+
+# Applies captured input through SaveSystem first, then direct InputMap when unavailable.
+func _apply_captured_event(event: InputEvent) -> bool:
+	if not _can_apply_captured_event():
+		return false
+	var km := _get_keybinding_module()
+	if km:
+		_apply_captured_event_to_module(km, event)
+		return true
+	return _apply_captured_event_to_input_map(event)
+
+
+# Validates the target action and binding index before mutating module or InputMap state.
+func _can_apply_captured_event() -> bool:
+	if not InputMap.has_action(action):
+		push_error("KeybindingRow: InputMap 缺少 action=%s" % action)
+		return false
+	if _pending_binding_index == -1:
+		return true
+	var old_events := InputMap.action_get_events(action)
+	if _pending_binding_index >= old_events.size():
+		push_error("KeybindingRow: 绑定索引越界 action=%s index=%d" % [action, _pending_binding_index])
+		return false
+	return true
+
+
+# Updates the keybinding module so it can broadcast and persist the new event.
+func _apply_captured_event_to_module(km: KeybindingModule, event: InputEvent) -> void:
+	if _pending_binding_index == -1:
+		km.add_action_event(action, event)
+	else:
+		km.rebind_action_event(action, _pending_binding_index, event)
+	var ss := _get_save_system()
+	if ss and ss.has_method("save_global"):
+		ss.save_global()
+
+
+# Updates InputMap directly for tests or projects without the SaveSystem autoload.
+func _apply_captured_event_to_input_map(event: InputEvent) -> bool:
+	if _pending_binding_index == -1:
+		InputMap.action_add_event(action, event)
+		return true
+	var old_events := InputMap.action_get_events(action)
+	InputMap.action_erase_event(action, old_events[_pending_binding_index])
+	InputMap.action_add_event(action, event)
+	return true
+
+
+# Finds the keybinding module from the SaveSystem autoload when available.
 static func _get_keybinding_module() -> KeybindingModule:
 	var tree := Engine.get_main_loop() as SceneTree
 	if not tree:
@@ -130,6 +193,8 @@ static func _get_keybinding_module() -> KeybindingModule:
 		return ss.get_module("keybindings") as KeybindingModule
 	return null
 
+
+# Finds the SaveSystem autoload for persisting edited bindings.
 static func _get_save_system() -> Node:
 	var tree := Engine.get_main_loop() as SceneTree
 	if not tree:

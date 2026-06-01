@@ -43,6 +43,7 @@ var equipment: Dictionary = {}
 ## 自定义玩家数据（开放扩展）
 var custom: Dictionary = {}
 
+# Registers the latest player module instance for save-system callbacks.
 func _init() -> void:
 	instance = self
 
@@ -50,10 +51,15 @@ func _init() -> void:
 # ISaveModule 接口
 # ──────────────────────────────────────────────
 
-func get_module_key() -> String: return "player"
+# Returns the stable slot-save key for player state.
+func get_module_key() -> String:
+	return "player"
 
-func is_global() -> bool: return false
+# Stores player state in slot saves because it belongs to one playthrough.
+func is_global() -> bool:
+	return false
 
+# Captures player stats, scene position, inventory, equipment, and custom data.
 func collect_data() -> Dictionary:
 	return {
 		"hp":          hp,
@@ -70,6 +76,7 @@ func collect_data() -> Dictionary:
 		"custom":      custom.duplicate(true),
 	}
 
+# Applies persisted player state and reconstructs the saved Vector2 position.
 func apply_data(data: Dictionary) -> void:
 	hp          = int(data.get("hp",         100))
 	max_hp      = int(data.get("max_hp",     100))
@@ -85,6 +92,7 @@ func apply_data(data: Dictionary) -> void:
 	equipment   = (data.get("equipment", {}) as Dictionary).duplicate(true)
 	custom      = (data.get("custom",    {}) as Dictionary).duplicate(true)
 
+# Provides the first-run payload for a fresh save slot.
 func get_default_data() -> Dictionary:
 	return {
 		"hp": 100, "max_hp": 100, "mp": 50, "max_mp": 50,
@@ -93,6 +101,7 @@ func get_default_data() -> Dictionary:
 		"inventory": [], "equipment": {}, "custom": {},
 	}
 
+# Resets player state to defaults for a new game.
 func on_new_game() -> void:
 	apply_data(get_default_data())
 

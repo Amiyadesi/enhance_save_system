@@ -30,6 +30,7 @@ const SKIP_PREFIXES := ["ui_"]
 ## action_name → Array[Dictionary]（已序列化）
 var _defaults: Dictionary = {}
 
+# Registers the latest keybinding module instance and snapshots project defaults.
 func _init() -> void:
 	instance = self
 	_snapshot_defaults()
@@ -38,8 +39,13 @@ func _init() -> void:
 # ISaveModule 接口
 # ──────────────────────────────────────────────
 
-func get_module_key() -> String: return "keybindings"
-func is_global()      -> bool:   return true
+# Returns the stable global-save key for input bindings.
+func get_module_key() -> String:
+	return "keybindings"
+
+# Stores keybindings globally because they are shared by all save slots.
+func is_global() -> bool:
+	return true
 
 ## 收集 InputMap 中所有用户动作的当前绑定
 func collect_data() -> Dictionary:
@@ -68,9 +74,11 @@ func apply_data(data: Dictionary) -> void:
 				InputMap.action_add_event(action, ev)
 	bindings_changed.emit()
 
+# Returns the project-default binding snapshot captured before save data loads.
 func get_default_data() -> Dictionary:
 	return _defaults.duplicate(true)
 
+# Restores project-default bindings for a new game or reset.
 func on_new_game() -> void:
 	reset_to_defaults()
 
@@ -80,56 +88,46 @@ func on_new_game() -> void:
 
 ## 重新绑定单个动作的指定事件
 func rebind_action_event(action: String, index: int, new_event: InputEvent) -> void:
-	if not InputMap.has_action(action):
-		push_warning("KeybindingModule: action '%s' 不存在" % action)
+	if not _require_action(action):
 		return
 	var events := InputMap.action_get_events(action)
-	if index < 0 or index >= events.size():
-		push_warning("KeybindingModule: index %d out of range" % index)
+	if not _is_valid_event_index(index, events.size(), "index %d out of range" % index):
 		return
 	InputMap.action_erase_event(action, events[index])
 	InputMap.action_add_event(action, new_event)
-	bindings_changed.emit()
+	_emit_bindings_changed()
 
 ## 添加新的按键绑定
 func add_action_event(action: String, new_event: InputEvent) -> void:
-	if not InputMap.has_action(action):
-		push_warning("KeybindingModule: action '%s' 不存在" % action)
+	if not _require_action(action):
 		return
 	InputMap.action_add_event(action, new_event)
-	bindings_changed.emit()
+	_emit_bindings_changed()
 
 ## 删除指定的按键绑定
 func remove_action_event(action: String, index: int) -> void:
-	if not InputMap.has_action(action):
-		push_warning("KeybindingModule: action '%s' 不存在" % action)
+	if not _require_action(action):
 		return
 	var events := InputMap.action_get_events(action)
-	if index < 0 or index >= events.size():
-		push_warning("KeybindingModule: index %d out of range" % index)
+	if not _is_valid_event_index(index, events.size(), "index %d out of range" % index):
 		return
 	InputMap.action_erase_event(action, events[index])
-	bindings_changed.emit()
+	_emit_bindings_changed()
 
 ## 重新排序按键绑定
 func reorder_action_events(action: String, from_index: int, to_index: int) -> void:
-	if not InputMap.has_action(action):
-		push_warning("KeybindingModule: action '%s' 不存在" % action)
+	if not _require_action(action):
 		return
 	var events := InputMap.action_get_events(action)
-	if from_index < 0 or from_index >= events.size() or to_index < 0 or to_index >= events.size():
-		push_warning("KeybindingModule: index out of range")
+	if not _can_reorder_events(from_index, to_index, events.size()):
 		return
 	var event := events[from_index]
-	InputMap.action_erase_event(action, event)
 	# 重新添加事件到新位置
 	var new_events = events.duplicate()
 	new_events.remove_at(from_index)
 	new_events.insert(to_index, event)
-	InputMap.action_erase_events(action)
-	for ev in new_events:
-		InputMap.action_add_event(action, ev)
-	bindings_changed.emit()
+	_replace_action_events(action, new_events)
+	_emit_bindings_changed()
 
 ## 检测按键冲突
 func check_conflict(new_event: InputEvent) -> Array:
@@ -146,15 +144,14 @@ func check_conflict(new_event: InputEvent) -> Array:
 
 ## 重新绑定单个动作的第一个事件（保留其余事件）
 func rebind_action_primary(action: String, new_event: InputEvent) -> void:
-	if not InputMap.has_action(action):
-		push_warning("KeybindingModule: action '%s' 不存在" % action)
+	if not _require_action(action):
 		return
 	# 移除旧的第一个事件，插入新事件
 	var events := InputMap.action_get_events(action)
 	if events.size() > 0:
 		InputMap.action_erase_event(action, events[0])
 	InputMap.action_add_event(action, new_event)
-	bindings_changed.emit()
+	_emit_bindings_changed()
 
 ## 获取动作的所有绑定事件
 func get_action_events(action: String) -> Array[InputEvent]:
@@ -181,7 +178,7 @@ func _events_equal(a: InputEvent, b: InputEvent) -> bool:
 ## 重置全部绑定到默认值
 func reset_to_defaults() -> void:
 	InputMap.load_from_project_settings()
-	bindings_changed.emit()
+	_emit_bindings_changed()
 
 ## 获取指定动作的第一个绑定事件（用于 UI 显示）
 func get_primary_event(action: String) -> InputEvent:
@@ -202,11 +199,48 @@ func get_user_actions() -> PackedStringArray:
 # 内部
 # ──────────────────────────────────────────────
 
+# Captures project InputMap defaults before persisted bindings are applied.
 func _snapshot_defaults() -> void:
 	# 从 ProjectSettings 原始 InputMap 快照（在任何 apply_data 之前）
 	InputMap.load_from_project_settings()
 	_defaults = collect_data()
 
+# Reports and rejects missing InputMap actions for mutating APIs.
+func _require_action(action: String) -> bool:
+	if InputMap.has_action(action):
+		return true
+	push_warning("KeybindingModule: action '%s' 不存在" % action)
+	return false
+
+
+# Reports whether an event index points to an existing binding.
+func _is_valid_event_index(index: int, event_count: int, warning: String) -> bool:
+	if index >= 0 and index < event_count:
+		return true
+	push_warning("KeybindingModule: %s" % warning)
+	return false
+
+
+# Reports whether a reorder request can address both source and target slots.
+func _can_reorder_events(from_index: int, to_index: int, event_count: int) -> bool:
+	if _is_valid_event_index(from_index, event_count, "index out of range") and _is_valid_event_index(to_index, event_count, "index out of range"):
+		return true
+	return false
+
+
+# Rewrites an action's event list in the requested order.
+func _replace_action_events(action: String, events: Array) -> void:
+	InputMap.action_erase_events(action)
+	for event in events:
+		InputMap.action_add_event(action, event)
+
+
+# Emits the single public change signal after successful mutations.
+func _emit_bindings_changed() -> void:
+	bindings_changed.emit()
+
+
+# Reports whether an action belongs to an engine-reserved prefix.
 func _should_skip(action: String) -> bool:
 	for prefix in SKIP_PREFIXES:
 		if action.begins_with(prefix):

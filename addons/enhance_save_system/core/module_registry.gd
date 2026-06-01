@@ -32,18 +32,30 @@ func load_from_config(config_path: String) -> Array:
 		push_warning("ModuleRegistry: cannot load config '%s' (err=%d)" % [config_path, err])
 		return []
 
-	# 解析所有条目
+	var entries := _load_entries(cfg)
+	_sort_entries_by_priority(entries)
+	return _instantiate_enabled_modules(entries)
+
+# ──────────────────────────────────────────────
+# 内部工具
+# ──────────────────────────────────────────────
+
+## 读取配置文件中的所有有效模块条目。
+func _load_entries(cfg: ConfigFile) -> Array:
 	var entries: Array = []
 	for section in cfg.get_sections():
 		var entry := _parse_entry(cfg, section)
 		if entry.is_empty():
 			continue
 		entries.append(entry)
+	return entries
 
-	# 按 priority 升序排序
-	entries.sort_custom(func(a, b): return a["priority"] < b["priority"])
+## 按 priority 升序整理模块条目，保持加载顺序可预测。
+func _sort_entries_by_priority(entries: Array) -> void:
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["priority"] < b["priority"])
 
-	# 加载并实例化模块
+## 实例化所有启用的模块，禁用条目保持静默跳过。
+func _instantiate_enabled_modules(entries: Array) -> Array:
 	var modules: Array = []
 	for entry in entries:
 		if not entry.get("enabled", true):
@@ -54,10 +66,6 @@ func load_from_config(config_path: String) -> Array:
 
 	return modules
 
-# ──────────────────────────────────────────────
-# 内部工具
-# ──────────────────────────────────────────────
-
 ## 解析单个配置节
 ## 返回 { section, path, enabled, priority }；无效时返回空 Dictionary
 func _parse_entry(cfg: ConfigFile, section: String) -> Dictionary:
@@ -67,7 +75,7 @@ func _parse_entry(cfg: ConfigFile, section: String) -> Dictionary:
 	return {
 		"section":  section,
 		"path":     str(cfg.get_value(section, "path", "")),
-		"enabled":  bool(cfg.get_value(section, "enabled", true)),
+		"enabled":  _is_truthy(cfg.get_value(section, "enabled", true)),
 		"priority": int(cfg.get_value(section, "priority", 100)),
 	}
 
@@ -85,3 +93,17 @@ func _load_module(path: String, section: String) -> ISaveModule:
 		push_warning("ModuleRegistry: '%s' is not an ISaveModule subclass, skipped" % path)
 		return null
 	return instance as ISaveModule
+
+
+## Coerces config scalar values into enabled/disabled booleans.
+func _is_truthy(value: Variant) -> bool:
+	if value is bool:
+		return value
+	if value is int:
+		return value != 0
+	if value is float:
+		return not is_zero_approx(value)
+	if value is String:
+		var trimmed := String(value).strip_edges().to_lower()
+		return trimmed in ["true", "1", "yes", "on"]
+	return false

@@ -31,6 +31,12 @@ var encryption_type: String = ""
 ## 压缩类型（来自 _meta.compression，如 "gzip"/"deflate"）
 var compression: String = ""
 
+## payload 正文编码（来自 _meta.payload_format）
+var payload_format: String = ""
+
+## 存储容器类型（legacy_text_json / plain_text_json / container）
+var storage_kind: String = ""
+
 ## 创建一个 SlotInfo
 static func make(p_slot: int, p_exists: bool, p_meta: Dictionary) -> SlotInfo:
 	var info := SlotInfo.new()
@@ -44,16 +50,26 @@ static func make(p_slot: int, p_exists: bool, p_meta: Dictionary) -> SlotInfo:
 		info.format_version = int(p_meta.get("version", 0))
 		info.encryption_type = str(p_meta.get("encryption_type", ""))
 		info.compression    = str(p_meta.get("compression", ""))
+		info.payload_format = str(p_meta.get("payload_format", ""))
+		info.storage_kind   = str(p_meta.get("storage_kind", ""))
 	return info
 
 ## 返回可读的存档时间字符串（空槽位返回 "—"）
 func get_time_string() -> String:
 	if not exists or saved_at == 0:
 		return "—"
-	var dt := Time.get_datetime_dict_from_unix_time(saved_at)
-	return "%04d-%02d-%02d  %02d:%02d" % [
-		dt["year"], dt["month"], dt["day"],
-		dt["hour"], dt["minute"],
+	return format_unix_for_player(saved_at)
+
+
+## Formats a Unix timestamp without relying on host-project helpers.
+static func format_unix_for_player(unix_time: int) -> String:
+	var dt := Time.get_datetime_dict_from_unix_time(unix_time)
+	return "%04d-%02d-%02d %02d:%02d" % [
+		int(dt.get("year", 0)),
+		int(dt.get("month", 0)),
+		int(dt.get("day", 0)),
+		int(dt.get("hour", 0)),
+		int(dt.get("minute", 0)),
 	]
 
 ## 调试用字符串

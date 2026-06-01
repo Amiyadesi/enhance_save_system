@@ -76,6 +76,7 @@ static func cleanup_tmp(path: String) -> void:
 # 内部工具
 # ──────────────────────────────────────────────
 
+## Ensures the target file's parent directory exists before writing.
 static func _ensure_dir(path: String) -> void:
 	var dir := path.get_base_dir()
 	if not DirAccess.dir_exists_absolute(dir):

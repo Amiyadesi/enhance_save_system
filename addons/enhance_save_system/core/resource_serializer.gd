@@ -149,35 +149,13 @@ static func serialize_event(event: InputEvent) -> Dictionary:
 	if event == null:
 		return {}
 	if event is InputEventKey:
-		return {
-			"event_type"  : "key",
-			"keycode"     : event.keycode,
-			"physical"    : event.physical_keycode,
-			"key_label"   : event.key_label,
-			"ctrl"        : event.ctrl_pressed,
-			"shift"       : event.shift_pressed,
-			"alt"         : event.alt_pressed,
-			"meta"        : event.meta_pressed,
-		}
+		return _serialize_key_event(event)
 	elif event is InputEventMouseButton:
-		return {
-			"event_type"  : "mouse_button",
-			"button_index": event.button_index,
-			"ctrl"        : event.ctrl_pressed,
-			"shift"       : event.shift_pressed,
-			"alt"         : event.alt_pressed,
-		}
+		return _serialize_mouse_button_event(event)
 	elif event is InputEventJoypadButton:
-		return {
-			"event_type"   : "joypad_button",
-			"button_index" : event.button_index,
-		}
+		return _serialize_joypad_button_event(event)
 	elif event is InputEventJoypadMotion:
-		return {
-			"event_type"   : "joypad_motion",
-			"axis"         : event.axis,
-			"axis_value"   : event.axis_value,
-		}
+		return _serialize_joypad_motion_event(event)
 	push_warning("ResourceSerializer.serialize_event: 不支持的 InputEvent 类型 %s" % event.get_class())
 	return {}
 
@@ -188,31 +166,13 @@ static func deserialize_event(data: Dictionary) -> InputEvent:
 	var t: String = data.get("event_type", "")
 	match t:
 		"key":
-			var ev := InputEventKey.new()
-			ev.keycode          = int(data.get("keycode",    0))
-			ev.physical_keycode = int(data.get("physical",   0))
-			ev.key_label        = int(data.get("key_label",  0))
-			ev.ctrl_pressed     = bool(data.get("ctrl",      false))
-			ev.shift_pressed    = bool(data.get("shift",     false))
-			ev.alt_pressed      = bool(data.get("alt",       false))
-			ev.meta_pressed     = bool(data.get("meta",      false))
-			return ev
+			return _deserialize_key_event(data)
 		"mouse_button":
-			var ev := InputEventMouseButton.new()
-			ev.button_index  = int(data.get("button_index", 0))
-			ev.ctrl_pressed  = bool(data.get("ctrl",  false))
-			ev.shift_pressed = bool(data.get("shift", false))
-			ev.alt_pressed   = bool(data.get("alt",   false))
-			return ev
+			return _deserialize_mouse_button_event(data)
 		"joypad_button":
-			var ev := InputEventJoypadButton.new()
-			ev.button_index = int(data.get("button_index", 0))
-			return ev
+			return _deserialize_joypad_button_event(data)
 		"joypad_motion":
-			var ev := InputEventJoypadMotion.new()
-			ev.axis       = int(data.get("axis", 0))
-			ev.axis_value = float(data.get("axis_value", 0.0))
-			return ev
+			return _deserialize_joypad_motion_event(data)
 	push_warning("ResourceSerializer.deserialize_event: 未知 event_type '%s'" % t)
 	return null
 
@@ -221,25 +181,105 @@ static func event_to_display_string(event: InputEvent) -> String:
 	if event == null:
 		return "（未绑定）"
 	if event is InputEventKey:
-		var parts: PackedStringArray = []
-		if event.ctrl_pressed:  parts.append("Ctrl")
-		if event.shift_pressed: parts.append("Shift")
-		if event.alt_pressed:   parts.append("Alt")
-		if event.meta_pressed:  parts.append("Meta")
-		var kname := OS.get_keycode_string(event.keycode)
-		if kname.is_empty():
-			kname = OS.get_keycode_string(event.physical_keycode)
-		parts.append(kname if not kname.is_empty() else "Key(%d)" % event.keycode)
-		return "+".join(parts)
+		return _key_event_to_display_string(event)
 	elif event is InputEventMouseButton:
-		const BTN_NAMES := {
-			MOUSE_BUTTON_LEFT  : "鼠标左键",
-			MOUSE_BUTTON_RIGHT : "鼠标右键",
-			MOUSE_BUTTON_MIDDLE: "鼠标中键",
-		}
-		return BTN_NAMES.get(event.button_index, "鼠标键%d" % event.button_index)
+		return _mouse_button_event_to_display_string(event)
 	elif event is InputEventJoypadButton:
 		return "手柄键%d" % event.button_index
 	elif event is InputEventJoypadMotion:
 		return "摇杆轴%d(%.1f)" % [event.axis, event.axis_value]
 	return event.as_text()
+
+## Serializes keyboard events including modifier state.
+static func _serialize_key_event(event: InputEventKey) -> Dictionary:
+	return {
+		"event_type"  : "key",
+		"keycode"     : event.keycode,
+		"physical"    : event.physical_keycode,
+		"key_label"   : event.key_label,
+		"ctrl"        : event.ctrl_pressed,
+		"shift"       : event.shift_pressed,
+		"alt"         : event.alt_pressed,
+		"meta"        : event.meta_pressed,
+	}
+
+## Serializes mouse-button events including keyboard modifiers.
+static func _serialize_mouse_button_event(event: InputEventMouseButton) -> Dictionary:
+	return {
+		"event_type"  : "mouse_button",
+		"button_index": event.button_index,
+		"ctrl"        : event.ctrl_pressed,
+		"shift"       : event.shift_pressed,
+		"alt"         : event.alt_pressed,
+	}
+
+## Serializes joypad button events.
+static func _serialize_joypad_button_event(event: InputEventJoypadButton) -> Dictionary:
+	return {
+		"event_type"   : "joypad_button",
+		"button_index" : event.button_index,
+	}
+
+## Serializes joypad axis motion events.
+static func _serialize_joypad_motion_event(event: InputEventJoypadMotion) -> Dictionary:
+	return {
+		"event_type"   : "joypad_motion",
+		"axis"         : event.axis,
+		"axis_value"   : event.axis_value,
+	}
+
+## Restores keyboard events from JSON-safe event data.
+static func _deserialize_key_event(data: Dictionary) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode          = int(data.get("keycode",    0))
+	ev.physical_keycode = int(data.get("physical",   0))
+	ev.key_label        = int(data.get("key_label",  0))
+	ev.ctrl_pressed     = bool(data.get("ctrl",      false))
+	ev.shift_pressed    = bool(data.get("shift",     false))
+	ev.alt_pressed      = bool(data.get("alt",       false))
+	ev.meta_pressed     = bool(data.get("meta",      false))
+	return ev
+
+## Restores mouse-button events from JSON-safe event data.
+static func _deserialize_mouse_button_event(data: Dictionary) -> InputEventMouseButton:
+	var ev := InputEventMouseButton.new()
+	ev.button_index  = int(data.get("button_index", 0))
+	ev.ctrl_pressed  = bool(data.get("ctrl",  false))
+	ev.shift_pressed = bool(data.get("shift", false))
+	ev.alt_pressed   = bool(data.get("alt",   false))
+	return ev
+
+## Restores joypad button events from JSON-safe event data.
+static func _deserialize_joypad_button_event(data: Dictionary) -> InputEventJoypadButton:
+	var ev := InputEventJoypadButton.new()
+	ev.button_index = int(data.get("button_index", 0))
+	return ev
+
+## Restores joypad axis motion events from JSON-safe event data.
+static func _deserialize_joypad_motion_event(data: Dictionary) -> InputEventJoypadMotion:
+	var ev := InputEventJoypadMotion.new()
+	ev.axis       = int(data.get("axis", 0))
+	ev.axis_value = float(data.get("axis_value", 0.0))
+	return ev
+
+## Formats keyboard events with modifier names before the key label.
+static func _key_event_to_display_string(event: InputEventKey) -> String:
+	var parts: PackedStringArray = []
+	if event.ctrl_pressed:  parts.append("Ctrl")
+	if event.shift_pressed: parts.append("Shift")
+	if event.alt_pressed:   parts.append("Alt")
+	if event.meta_pressed:  parts.append("Meta")
+	var kname := OS.get_keycode_string(event.keycode)
+	if kname.is_empty():
+		kname = OS.get_keycode_string(event.physical_keycode)
+	parts.append(kname if not kname.is_empty() else "Key(%d)" % event.keycode)
+	return "+".join(parts)
+
+## Formats common mouse buttons with localized names.
+static func _mouse_button_event_to_display_string(event: InputEventMouseButton) -> String:
+	const BTN_NAMES := {
+		MOUSE_BUTTON_LEFT  : "鼠标左键",
+		MOUSE_BUTTON_RIGHT : "鼠标右键",
+		MOUSE_BUTTON_MIDDLE: "鼠标中键",
+	}
+	return BTN_NAMES.get(event.button_index, "鼠标键%d" % event.button_index)

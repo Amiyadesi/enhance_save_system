@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://d0qt0rim6cfk1"]
+
+[node name="KeybindingEventButton" type="Button"]
+custom_minimum_size = Vector2(120, 32)
+size_flags_horizontal = 3
+text = "未绑定"

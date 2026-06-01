@@ -1,11 +1,13 @@
-[gd_scene format=3 uid="uid://dxllrn47y1tw0"]
+[gd_scene load_steps=3 format=3 uid="uid://dxllrn47y1tw0"]
 
 [ext_resource type="Script" uid="uid://badp5fte1l1kx" path="res://addons/enhance_save_system/Components/InputRemapping/keybinding_row.gd" id="1_8wuhb"]
+[ext_resource type="PackedScene" path="res://addons/enhance_save_system/Components/InputRemapping/keybinding_event_button.tscn" id="2_event_button"]
 
 [node name="KeybindingRow" type="HBoxContainer" unique_id=1096872369]
 custom_minimum_size = Vector2(0, 36)
 size_flags_horizontal = 3
 script = ExtResource("1_8wuhb")
+binding_button_scene = ExtResource("2_event_button")
 
 [node name="ActionLabel" type="Label" parent="." unique_id=1010614958]
 unique_name_in_owner = true

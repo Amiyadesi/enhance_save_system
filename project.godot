@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 SaveSystem="*uid://bv1y5o6lgq7yi"
+SaveSystemCSharp="*uid://cp4mc86xr3adv"
 
 [dotnet]
 
@@ -24,7 +25,7 @@ project/assembly_name="存档系统插件"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/enhance_save_system/plugin.cfg", "res://addons/gdUnit4/plugin.cfg")
+enabled=PackedStringArray("res://addons/enhance_save_system/plugin.cfg", "res://addons/enhance_save_system_csharp/plugin.cfg")
 
 [physics]
 

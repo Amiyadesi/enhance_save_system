@@ -49,36 +49,54 @@ func migrate(payload: Dictionary, current_version: int, target_version: int, mod
 	var version := current_version
 
 	while version < target_version:
-		# 调用全局迁移函数（若已注册）
-		if _migrations.has(version):
-			var fn: Callable = _migrations[version]
-			var result = fn.call(working)
-			if result == null or not (result is Dictionary):
-				last_error = "Migration fn for version %d returned invalid result" % version
-				push_error("MigrationManager: " + last_error)
-				return backup
-			working = result
-
-		# 调用各模块的 migrate_payload（若已重写）
-		for module in modules:
-			if not (module is ISaveModule):
-				continue
-			var key: String = module.get_module_key()
-			if not working.has(key):
-				continue
-			var module_data: Dictionary = working[key]
-			var migrated_data: Dictionary = module.migrate_payload(module_data, version)
-			working[key] = migrated_data
-
+		var migrated_version := _migrate_one_version(working, version, modules)
+		if migrated_version == null:
+			return backup
+		working = migrated_version as Dictionary
 		version += 1
 
-	# 更新 _meta.version
+	_write_meta_version(working, target_version)
+	return working
+
+## 执行单个版本步进中的全局迁移和模块迁移。
+func _migrate_one_version(working: Dictionary, version: int, modules: Array) -> Variant:
+	var registered_result := _apply_registered_migration(working, version)
+	if registered_result == null:
+		return null
+	var migrated := registered_result as Dictionary
+	_apply_module_migrations(migrated, modules, version)
+	return migrated
+
+## 调用已注册的全局迁移函数，并记录无效返回值。
+func _apply_registered_migration(working: Dictionary, version: int) -> Variant:
+	if not _migrations.has(version):
+		return working
+	var fn: Callable = _migrations[version]
+	var result = fn.call(working)
+	if result == null or not (result is Dictionary):
+		last_error = "Migration fn for version %d returned invalid result" % version
+		push_error("MigrationManager: " + last_error)
+		return null
+	return result
+
+## 调用每个模块针对当前版本的 payload 迁移钩子。
+func _apply_module_migrations(working: Dictionary, modules: Array, version: int) -> void:
+	for module in modules:
+		if not (module is ISaveModule):
+			continue
+		var key: String = module.get_module_key()
+		if not working.has(key):
+			continue
+		var module_data: Dictionary = working[key]
+		var migrated_data: Dictionary = module.migrate_payload(module_data, version)
+		working[key] = migrated_data
+
+## 写入迁移完成后的目标存档版本号。
+func _write_meta_version(working: Dictionary, target_version: int) -> void:
 	if working.has("_meta"):
 		working["_meta"]["version"] = target_version
 	else:
 		working["_meta"] = { "version": target_version }
-
-	return working
 
 ## 检查 payload 是否需要迁移
 ## target_version: 目标版本号（通常为 SaveWriter.FORMAT_VERSION）
@@ -104,6 +122,7 @@ static func _deep_copy(data: Dictionary) -> Dictionary:
 			result[key] = val
 	return result
 
+## Deep-copies nested arrays inside migration backup payloads.
 static func _deep_copy_array(arr: Array) -> Array:
 	var result: Array = []
 	for item in arr:

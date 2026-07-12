@@ -125,13 +125,13 @@ func _check_conflicts(event: InputEvent) -> Array:
 
 
 # Finds the keybinding module from the SaveSystem autoload when available.
-static func _get_keybinding_module() -> KeybindingModule:
+static func _get_keybinding_module() -> Variant:
 	var tree := Engine.get_main_loop() as SceneTree
 	if not tree:
 		return null
 	var ss := tree.root.get_node_or_null("SaveSystem")
 	if ss and ss.has_method("get_module"):
-		return ss.get_module("keybindings") as KeybindingModule
+		return ss.get_module("keybindings")
 	return null
 
 # ──────────────────────────────────────────────

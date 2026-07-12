@@ -38,7 +38,7 @@ signal save_migrated(slot: int, old_version: int, new_version: int)
 # ──────────────────────────────────────────────
 
 @export var max_slots: int = 3
-@export var auto_register: bool = true
+@export var auto_register: bool = false
 @export var auto_load_global: bool = true
 @export var auto_load_slot: int = 0
 @export var game_version: String = "1.0.0"
@@ -77,7 +77,7 @@ signal save_migrated(slot: int, old_version: int, new_version: int)
 
 ## 模块注册配置
 @export var use_module_config: bool = true
-@export var module_config_path: String = "res://addons/enhance_save_system/save_modules.cfg"
+@export var module_config_path: String = "res://Config/save_modules.cfg"
 
 # ──────────────────────────────────────────────
 # 路径常量
@@ -207,68 +207,24 @@ func _screenshot_path(slot: int) -> String:
 # 模块注册
 # ──────────────────────────────────────────────
 
-## Registers save modules either from the explicit config or this plugin's Modules directory.
+## Registers modules from the project-owned configuration file.
 func _auto_register_modules() -> void:
-	if use_module_config:
-		var modules := _load_config_modules()
-		if not modules.is_empty():
-			for m in modules:
-				register_module(m)
-			return
-
-	_register_modules_from_directory()
+	if not use_module_config:
+		return
+	for module in _load_config_modules():
+		register_module(module)
 
 
-## Loads configured modules when the cfg exists, otherwise requests fallback scanning.
+## Loads the explicit project module configuration.
 func _load_config_modules() -> Array:
 	if not FileAccess.file_exists(module_config_path):
-		push_warning("SaveSystem._auto_register_modules: module config not found '%s'; falling back to Modules/" % module_config_path)
+		push_error("SaveSystem._auto_register_modules: module config not found '%s'" % module_config_path)
 		return []
 	var registry := ModuleRegistry.new()
 	var modules := registry.load_from_config(module_config_path)
 	if modules.is_empty():
-		push_warning("SaveSystem._auto_register_modules: module config loaded no modules '%s'; falling back to Modules/" % module_config_path)
+		push_error("SaveSystem._auto_register_modules: module config loaded no modules '%s'" % module_config_path)
 	return modules
-
-
-## Scans the plugin-local Modules directory when no usable cfg is available.
-func _register_modules_from_directory() -> void:
-	var modules_dir := _resolve_modules_dir()
-	if modules_dir.is_empty():
-		return
-	var dir := DirAccess.open(modules_dir)
-	if dir == null:
-		push_error("SaveSystem._auto_register_modules: 无法打开模块目录 '%s'" % modules_dir)
-		return
-	dir.list_dir_begin()
-	var file_name := dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".gd"):
-			_try_load_and_register(modules_dir.path_join(file_name))
-		file_name = dir.get_next()
-	dir.list_dir_end()
-
-## Resolves the module scan directory next to the plugin core script.
-func _resolve_modules_dir() -> String:
-	var script_path: String = (get_script() as GDScript).resource_path
-	var save_dir := script_path.get_base_dir().get_base_dir()
-	var dynamic := save_dir.path_join("Modules")
-	if DirAccess.dir_exists_absolute(dynamic):
-		return dynamic
-	push_error("SaveSystem: module directory not found '%s'" % dynamic)
-	return ""
-
-## Loads one module script from disk and registers it when it implements ISaveModule.
-func _try_load_and_register(path: String) -> void:
-	var script := ResourceLoader.load(path, "GDScript") as GDScript
-	if script == null:
-		push_error("SaveSystem: 加载模块脚本失败 '%s'" % path)
-		return
-	var instance = script.new()
-	if not instance is ISaveModule:
-		push_error("SaveSystem: 模块脚本不是 ISaveModule '%s'" % path)
-		return
-	register_module(instance as ISaveModule)
 
 ## 注册存档模块
 ## priority: 执行优先级，数值越小越先执行 collect_data / apply_data（默认 100）

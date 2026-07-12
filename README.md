@@ -2,8 +2,9 @@
 
 Godot 4 modular save-system addon. This repository ships two variants:
 
-- `addons/enhance_save_system`: full GDScript version with editor panel, input-remapping UI, encryption, compression, migration, atomic writes, import/export, and demos.
-- `addons/enhance_save_system_csharp`: C# runtime version with module registration, JSON saves, cfg fallback, import/export, and bundled example modules.
+- `addons/enhance_save_system`: GDScript core with editor panel, input-remapping UI, encryption, compression, migration, atomic writes, and import/export.
+- `addons/enhance_save_system_modules`: project data modules kept outside the core addon.
+- `addons/enhance_save_system_csharp`: C# core runtime with project-owned module registration, JSON saves, and import/export.
 
 The GDScript version is the feature-complete version. The C# version is a clean runtime base for Mono projects that want C# modules.
 
@@ -11,16 +12,16 @@ The GDScript version is the feature-complete version. The C# version is a clean 
 
 ### GDScript
 
-1. Copy `addons/enhance_save_system` into your Godot project.
+1. Copy both GDScript addon folders into your Godot project.
 2. Enable **Enhanced Save System** in `Project > Project Settings > Plugins`.
-3. The plugin registers the `SaveSystem` autoload.
+3. Add your `Scripts/Save/save_system.gd` wrapper as the `SaveSystem` autoload.
 
 ### C#
 
 1. Copy `addons/enhance_save_system_csharp` into a Godot Mono project.
 2. Make sure the project has a `.csproj` using `Godot.NET.Sdk` for your Godot version.
 3. Enable **Enhanced Save System C#** in `Project > Project Settings > Plugins`.
-4. The plugin registers the `SaveSystemCSharp` autoload.
+4. Add a project-owned `SaveSystemCSharp` subclass as the `SaveSystemCSharp` autoload.
 
 ## Quick Start
 
@@ -47,30 +48,28 @@ saveSystem.QuickLoad();
 
 Both variants support `save_modules.cfg`.
 
-- GDScript default path: `res://addons/enhance_save_system/save_modules.cfg`
-- C# default path: `res://addons/enhance_save_system_csharp/save_modules.cfg`
+- GDScript default path: `res://Config/save_modules.cfg`
+- C# default path: `res://Config/save_modules_csharp.cfg`
 
-If the cfg is missing or contains no loadable modules, the save system now falls back to scanning its own `Modules/` directory. This makes exported builds safer when a cfg is accidentally omitted, while still allowing explicit ordering when the cfg is present.
+The GDScript core does not scan addon-local modules. Projects own their module configuration and fail loudly when an enabled SaveSystem cannot load it.
 
 For exported games, include the cfg files in the export preset when you rely on explicit module ordering:
 
-- `addons/enhance_save_system/save_modules.cfg`
-- `addons/enhance_save_system_csharp/save_modules.cfg`
-
-If you omit them, the fallback scanner still loads addon-local modules from `Modules/`.
+- `Config/save_modules.cfg`
+- `Config/save_modules_csharp.cfg`
 
 Example:
 
 ```ini
 [player_module]
-path = "res://addons/enhance_save_system/Modules/player_module.gd"
+path = "res://addons/enhance_save_system_modules/Modules/player_module.gd"
 enabled = true
 priority = 20
 ```
 
-## Bundled Modules
+## Project Modules
 
-GDScript default modules include:
+The companion module package includes:
 
 - `settings`
 - `keybindings`
@@ -84,7 +83,7 @@ GDScript default modules include:
 - `player`
 - `level`
 
-Dialogue modules are bundled inside this addon as optional generic modules. They store resource paths, dialogue title, chapter/character labels, snippets, and variables without depending on Dialogue Manager classes. Projects that use Dialogue Manager can feed these modules with their current dialogue progress; projects that do not use Dialogue Manager can leave them registered harmlessly or disable them in cfg.
+Dialogue modules store resource paths, dialogue title, chapter/character labels, snippets, and variables without depending on Dialogue Manager classes. Register them in the project cfg when needed.
 
 ## Custom GDScript Module
 
@@ -128,7 +127,7 @@ public partial class MyModuleCSharp : RefCounted, ISaveModuleCSharp
 }
 ```
 
-Add it to the relevant cfg or place it in `addons/enhance_save_system_csharp/Modules/` for fallback scanning.
+Add it to the relevant project-owned cfg. The core addons never scan or overwrite project module directories.
 
 ## GDScript Features
 
@@ -155,21 +154,15 @@ Encrypted or compressed mode writes:
 
 The header keeps metadata readable for editor inspection. Old text JSON saves remain readable.
 
-## Demos
+## Version 2.0
 
-GDScript demo scenes live in `addons/enhance_save_system/demo/`:
-
-- `full_feature_demo.tscn`
-- `atomic_write_demo.tscn`
-- `migration_demo.tscn`
-- `import_export_demo.tscn`
-- `SaveDemo.tscn`
+See `addons/enhance_save_system/docs/migration_2_0.md` when updating from 1.1.1. Core updates no longer overwrite project data modules or module registration.
 
 ## Compatibility
 
 - Godot 4.6 tested in this repo.
 - GDScript addon is pure GDScript.
-- C# addon targets `Godot.NET.Sdk/4.6.2` in this standalone project; change the SDK version in the `.csproj` if your project uses another Godot 4.x Mono version.
+- C# addon targets `Godot.NET.Sdk/4.7.0` in this standalone project; change the SDK version in the `.csproj` if your project uses another Godot 4.x Mono version.
 
 ## License
 

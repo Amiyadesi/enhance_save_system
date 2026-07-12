@@ -11,12 +11,11 @@ public partial class SaveSystemCSharp : Node
     [Signal] public delegate void SlotChangedEventHandler(int newSlot);
 
     [Export] public int MaxSlots { get; set; } = 3;
-    [Export] public bool AutoRegister { get; set; } = true;
+    [Export] public bool AutoRegister { get; set; } = false;
     [Export] public bool AutoLoadGlobal { get; set; } = true;
     [Export] public int AutoLoadSlot { get; set; } = 0;
     [Export] public string GameVersion { get; set; } = "1.0.0";
-    [Export] public bool UseModuleConfig { get; set; } = true;
-    [Export] public string ModuleConfigPath { get; set; } = "res://addons/enhance_save_system_csharp/save_modules.cfg";
+    [Export] public string ModuleConfigPath { get; set; } = "res://Config/save_modules_csharp.cfg";
     [Export] public bool AtomicWriteEnabled { get; set; } = true;
     [Export] public bool BackupEnabled { get; set; } = false;
     [Export] public bool PrettyJsonEnabled { get; set; } = false;
@@ -198,70 +197,27 @@ public partial class SaveSystemCSharp : Node
         return DirAccess.CopyAbsolute(inPath, SlotPath(slot)) == Error.Ok;
     }
 
-    // Loads modules from cfg, otherwise falls back to scanning the local Modules directory.
+    // Loads modules from the project-owned configuration file.
     private void AutoRegisterModules()
     {
-        if (UseModuleConfig)
-        {
-            var modules = LoadConfigModules();
-            if (modules.Count > 0)
-            {
-                foreach (var entry in modules)
-                    RegisterModule(entry.Module, entry.Priority);
-                return;
-            }
-        }
-        RegisterModulesFromDirectory();
+        var modules = LoadConfigModules();
+        foreach (var entry in modules)
+            RegisterModule(entry.Module, entry.Priority);
     }
 
-    // Loads configured modules when the cfg exists and has valid entries.
+    // Loads configured modules from a required project file.
     private System.Collections.Generic.List<RegisteredSaveModuleCSharp> LoadConfigModules()
     {
         if (!FileAccess.FileExists(ModuleConfigPath))
         {
-            GD.PushWarning($"SaveSystemCSharp: module config not found '{ModuleConfigPath}'; falling back to Modules/");
+            GD.PushError($"SaveSystemCSharp: module config not found '{ModuleConfigPath}'");
             return new System.Collections.Generic.List<RegisteredSaveModuleCSharp>();
         }
         var registry = new ModuleRegistryCSharp();
         var modules = registry.LoadFromConfig(ModuleConfigPath);
         if (modules.Count == 0)
-            GD.PushWarning($"SaveSystemCSharp: module config loaded no modules '{ModuleConfigPath}'; falling back to Modules/");
+            GD.PushError($"SaveSystemCSharp: module config loaded no modules '{ModuleConfigPath}'");
         return modules;
-    }
-
-    // Scans addon-local C# module scripts.
-    private void RegisterModulesFromDirectory()
-    {
-        var modulesDir = ResolveModulesDir();
-        var dir = DirAccess.Open(modulesDir);
-        if (dir == null)
-        {
-            GD.PushError($"SaveSystemCSharp: cannot open module directory '{modulesDir}'");
-            return;
-        }
-
-        var registry = new ModuleRegistryCSharp();
-        dir.ListDirBegin();
-        var fileName = dir.GetNext();
-        while (!string.IsNullOrEmpty(fileName))
-        {
-            if (!dir.CurrentIsDir() && fileName.EndsWith(".cs"))
-            {
-                var loaded = registry.LoadModule(modulesDir.PathJoin(fileName));
-                if (loaded != null)
-                    RegisterModule(loaded.Module, loaded.Priority);
-            }
-            fileName = dir.GetNext();
-        }
-        dir.ListDirEnd();
-    }
-
-    // Resolves the module scan directory next to this addon.
-    private string ResolveModulesDir()
-    {
-        var script = GetScript().As<Script>();
-        var addonDir = script.ResourcePath.GetBaseDir().GetBaseDir();
-        return addonDir.PathJoin("Modules");
     }
 
     // Creates write options from exported settings.

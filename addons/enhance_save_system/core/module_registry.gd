@@ -7,13 +7,13 @@ extends RefCounted
 ##
 ## save_modules.cfg 格式：
 ##   [player_module]
-##   path = "res://addons/enhance_save_system/Modules/player_module.gd"
+##   path = "res://addons/enhance_save_system_modules/Modules/player_module.gd"
 ##   enabled = true
 ##   priority = 10
 ##
 ## 用法：
 ##   var registry := ModuleRegistry.new()
-##   var modules := registry.load_from_config("res://save_modules.cfg")
+##   var modules := registry.load_from_config("res://Config/save_modules.cfg")
 ##   for m in modules:
 ##       SaveSystem.register_module(m)
 
@@ -22,7 +22,7 @@ extends RefCounted
 # ──────────────────────────────────────────────
 
 ## 从配置文件加载并实例化模块
-## config_path: ConfigFile 路径（通常为 "res://save_modules.cfg"）
+## config_path: ConfigFile 路径（通常为 "res://Config/save_modules.cfg"）
 ## 返回按 priority 升序排列的 ISaveModule 数组
 ## enabled=false 的条目被跳过；路径不存在的条目打印警告后跳过
 func load_from_config(config_path: String) -> Array:

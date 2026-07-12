@@ -25,16 +25,6 @@ func _init() -> void:
 	instance = self
 
 
-# Registers the runtime save-system autoload when the plugin is enabled.
-func _enable_plugin() -> void:
-	add_autoload_singleton("SaveSystem", get_plugin_path() + "/core/save_system.gd")
-
-
-# Removes the runtime save-system autoload when the plugin is disabled.
-func _disable_plugin() -> void:
-	remove_autoload_singleton("SaveSystem")
-
-
 # Creates the authored bottom panel and starts the first slot scan.
 func _enter_tree() -> void:
 	_editor_panel = EDITOR_PANEL_SCENE.instantiate() as Control

@@ -27,10 +27,11 @@ const DEFAULTS := {
 	"master_volume"  : 0.8,
 	"music_volume"   : 0.8,
 	"sfx_volume"     : 0.8,
+	"ui_volume"      : 0.8,
 	"ambient_volume" : 0.8,
 	"screen_shake"   : 0.5,
 	"language"       : "zh_CN",
-	"display_mode"   : "windowed",
+	"display_mode"   : "fullscreen",
 	"borderless_enabled": false,
 	"window_width"   : 1920,
 	"window_height"  : 1080,
@@ -138,6 +139,8 @@ func apply_setting(key: String, value: Variant) -> void:
 			_apply_music_volume(float(value))
 		"sfx_volume":
 			_apply_sfx_volume(float(value))
+		"ui_volume":
+			_apply_ui_volume(float(value))
 		"ambient_volume":
 			_apply_ambient_volume(float(value))
 		"display_mode", "borderless_enabled", "window_width", "window_height":
@@ -180,6 +183,7 @@ func _normalize_values() -> void:
 	_values["master_volume"] = clampf(float(_values.get("master_volume", DEFAULTS["master_volume"])), 0.0, 1.0)
 	_values["music_volume"] = clampf(float(_values.get("music_volume", DEFAULTS["music_volume"])), 0.0, 1.0)
 	_values["sfx_volume"] = clampf(float(_values.get("sfx_volume", DEFAULTS["sfx_volume"])), 0.0, 1.0)
+	_values["ui_volume"] = clampf(float(_values.get("ui_volume", DEFAULTS["ui_volume"])), 0.0, 1.0)
 	_values["ambient_volume"] = clampf(float(_values.get("ambient_volume", DEFAULTS["ambient_volume"])), 0.0, 1.0)
 	_values["screen_shake"] = clampf(float(_values.get("screen_shake", DEFAULTS["screen_shake"])), 0.0, 1.0)
 	_values["display_mode"] = _normalize_display_mode(str(_values.get("display_mode", DEFAULTS["display_mode"])))
@@ -227,6 +231,14 @@ func _apply_sfx_volume(volume_between_0_and_1: float) -> void:
 	var sound_manager := _get_sound_manager()
 	if sound_manager != null and sound_manager.has_method("set_sound_volume"):
 		sound_manager.call("set_sound_volume", volume_between_0_and_1)
+	_apply_ui_volume(volume_between_0_and_1)
+
+
+# Applies interface-sound volume through SoundManager when available.
+func _apply_ui_volume(volume_between_0_and_1: float) -> void:
+	var sound_manager := _get_sound_manager()
+	if sound_manager != null and sound_manager.has_method("set_ui_sound_volume"):
+		sound_manager.call("set_ui_sound_volume", volume_between_0_and_1)
 
 
 # Applies ambient volume through SoundManager when available.

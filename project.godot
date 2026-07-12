@@ -16,8 +16,8 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-SaveSystem="*uid://bv1y5o6lgq7yi"
-SaveSystemCSharp="*uid://cp4mc86xr3adv"
+SaveSystem="*res://Scripts/Save/save_system.gd"
+SaveSystemCSharp="*res://Scripts/Save/ProjectSaveSystemCSharp.cs"
 
 [dotnet]
 

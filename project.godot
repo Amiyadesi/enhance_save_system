@@ -16,7 +16,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-SaveSystem="*res://Scripts/Save/save_system.gd"
+SaveSystem="*res://addons/enhance_save_system/core/save_system.gd"
 SaveSystemCSharp="*res://Scripts/Save/ProjectSaveSystemCSharp.cs"
 
 [dotnet]

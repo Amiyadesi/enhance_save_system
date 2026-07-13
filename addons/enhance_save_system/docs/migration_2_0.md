@@ -4,7 +4,7 @@ Enhanced Save System 2.0 no longer ships project data modules or `save_modules.c
 
 1. Copy the old `Modules/` directory to `addons/enhance_save_system_modules/Modules/`.
 2. Add a project-owned `Config/save_modules.cfg` with those module paths.
-3. Point the `SaveSystem` autoload at a small project script extending `core/save_system.gd`; set `auto_register = true` and `module_config_path` in `_init`.
+3. Enable the addon. It registers the core `SaveSystem` autoload automatically and loads `res://Config/save_modules.cfg` by default.
 4. Keep existing module keys and priorities. Existing save payloads continue to load because their keys and data shapes do not change.
 
 The core input-remapping scenes now retrieve the `keybindings` module through `SaveSystem.get_module("keybindings")`. No module class needs to live inside the core addon.

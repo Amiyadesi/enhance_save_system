@@ -38,7 +38,7 @@ signal save_migrated(slot: int, old_version: int, new_version: int)
 # ──────────────────────────────────────────────
 
 @export var max_slots: int = 3
-@export var auto_register: bool = false
+@export var auto_register: bool = true
 @export var auto_load_global: bool = true
 @export var auto_load_slot: int = 0
 @export var game_version: String = "1.0.0"

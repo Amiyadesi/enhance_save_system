@@ -14,7 +14,7 @@ The GDScript version is the feature-complete version. The C# version is a clean 
 
 1. Copy both GDScript addon folders into your Godot project.
 2. Enable **Enhanced Save System** in `Project > Project Settings > Plugins`.
-3. Add your `Scripts/Save/save_system.gd` wrapper as the `SaveSystem` autoload.
+3. The plugin registers `SaveSystem` automatically, pointing at `addons/enhance_save_system/core/save_system.gd`.
 
 ### C#
 
@@ -51,7 +51,7 @@ Both variants support `save_modules.cfg`.
 - GDScript default path: `res://Config/save_modules.cfg`
 - C# default path: `res://Config/save_modules_csharp.cfg`
 
-The GDScript core does not scan addon-local modules. Projects own their module configuration and fail loudly when an enabled SaveSystem cannot load it.
+The GDScript core does not scan addon-local modules. Projects own their module configuration and fail loudly when an enabled SaveSystem cannot load it. No project wrapper script is required.
 
 For exported games, include the cfg files in the export preset when you rely on explicit module ordering:
 

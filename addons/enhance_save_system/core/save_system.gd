@@ -615,8 +615,8 @@ func export_slot(slot: int, out_path: String) -> bool:
 	var ok := false
 	if SaveWriter.peek_meta(src).get("split_modules", false):
 		var payload := SaveWriter.read_json(src, _make_read_opts())
-		if payload.is_empty():
-			push_error("SaveSystem.export_slot: cannot read split slot %d" % s)
+		if payload.is_empty() or _has_missing_split_modules(payload):
+			push_error("SaveSystem.export_slot: cannot read every module of split slot %d" % s)
 			return false
 		var opts := _make_write_opts()
 		opts.split_modules_enabled = false
@@ -645,6 +645,9 @@ func import_slot(slot: int, in_path: String) -> bool:
 		push_error("SaveSystem.import_slot: invalid or unreadable save file '%s'" % in_path)
 		return false
 	var meta: Dictionary = payload.get("_meta", {})
+	if _has_missing_split_modules(payload):
+		push_error("SaveSystem.import_slot: '%s' is missing split module files %s" % [in_path, meta[SaveWriter.META_SPLIT_MISSING]])
+		return false
 	var has_module_data := false
 	for key in payload:
 		if not SaveWriter._is_reserved_key(key):
@@ -665,6 +668,11 @@ func import_slot(slot: int, in_path: String) -> bool:
 		_ensure_screenshot_dir()
 		DirAccess.copy_absolute(shot, _screenshot_path(slot))
 	return ok
+
+## True when a split save's index names modules whose files could not be read.
+func _has_missing_split_modules(payload: Dictionary) -> bool:
+	var meta: Dictionary = payload.get("_meta", {})
+	return not (meta.get(SaveWriter.META_SPLIT_MISSING, []) as Array).is_empty()
 
 ## Preview image path that travels with an exported save file.
 func _export_screenshot_path(save_path: String) -> String:

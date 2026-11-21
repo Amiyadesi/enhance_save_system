@@ -344,6 +344,7 @@ static func _read_split(main_data: Dictionary, path: String, _opts: ReadOptions)
 	var index: Dictionary = main_data.get("_index", {})
 	var result: Dictionary = { "_meta": main_data.get("_meta", {}) }
 	var base := path.get_basename()
+	var missing: Array = []
 	for key in index:
 		if _is_reserved_key(key):
 			continue
@@ -353,17 +354,17 @@ static func _read_split(main_data: Dictionary, path: String, _opts: ReadOptions)
 			module_path = str(index[key])
 		if not FileAccess.file_exists(module_path):
 			push_warning("SaveWriter: split module file not found '%s'" % module_path)
+			missing.append(key)
 			continue
-		var f := FileAccess.open(module_path, FileAccess.READ)
-		if f == null:
-			continue
-		var text := f.get_as_text()
-		var json := JSON.new()
-		if json.parse(text) != OK:
-			continue
-		var module_data = json.data
+		var module_data = JSON.parse_string(FileAccess.get_file_as_string(module_path))
 		if module_data is Dictionary and (module_data as Dictionary).has(key):
 			result[key] = (module_data as Dictionary)[key]
+		else:
+			push_warning("SaveWriter: split module file unreadable '%s'" % module_path)
+			missing.append(key)
+	# 索引里有、但读不出来的模块；需要完整数据的调用方（导入/导出）据此拒绝
+	if not missing.is_empty():
+		(result["_meta"] as Dictionary)[META_SPLIT_MISSING] = missing
 	return result
 
 ## Reads plain or legacy-XOR text JSON files for backward compatibility.
@@ -451,6 +452,10 @@ static func _without_reserved_keys(payload: Dictionary) -> Dictionary:
 
 
 ## "_meta" / "_index" belong to the writer; a payload read back from disk still carries them.
+## 读取分模块存档时，索引中存在但未能读出的模块键列表（只出现在读出的 _meta 里，不会写盘）
+const META_SPLIT_MISSING := "split_missing"
+
+
 static func _is_reserved_key(key: Variant) -> bool:
 	return key is String and (key == "_meta" or key == "_index")
 

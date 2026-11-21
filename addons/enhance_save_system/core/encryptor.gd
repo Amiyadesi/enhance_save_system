@@ -17,6 +17,9 @@ enum Mode { XOR, AES_CBC, AES_GCM }
 ## 错误码：完整性验证失败
 const ERR_INTEGRITY := -1
 
+## _meta["ctr"] 标记：AES_GCM 模式使用标准 CTR 计数器（2.0.1 起写入）
+const CTR_STANDARD := "be32"
+
 # ──────────────────────────────────────────────
 # 公开 API
 # ──────────────────────────────────────────────
@@ -166,8 +169,8 @@ static func _encrypt_aes_gcm(plaintext: PackedByteArray, key: String) -> Diction
 	var derived_key := _derive_key(key)
 	var iv := _random_iv()  # 16 字节 nonce
 
-	# CTR 加密
-	var ciphertext := _aes_ctr(plaintext, derived_key, iv)
+	# CTR 加密（标准计数器：末 4 字节按大端整数递增并进位）
+	var ciphertext := _aes_ctr(plaintext, derived_key, iv, false)
 
 	# GHASH 认证标签（使用 HMAC-SHA256 模拟 GCM 认证）
 	var tag := _compute_gcm_tag(ciphertext, iv, key)
@@ -178,6 +181,7 @@ static func _encrypt_aes_gcm(plaintext: PackedByteArray, key: String) -> Diction
 		"tag":        tag,
 		"hmac":       PackedByteArray(),
 		"mode":       "aes_gcm",
+		"ctr":        CTR_STANDARD,
 	}
 
 static func _decrypt_aes_gcm(meta: Dictionary, key: String) -> PackedByteArray:
@@ -192,11 +196,13 @@ static func _decrypt_aes_gcm(meta: Dictionary, key: String) -> PackedByteArray:
 		return PackedByteArray()
 
 	var derived_key := _derive_key(key)
-	# CTR 解密（与加密相同操作）
-	return _aes_ctr(ciphertext, derived_key, iv)
+	# CTR 解密（与加密相同操作）；没有 ctr 标记的是 2.0.0 及更早写出的存档，按旧计数器读取
+	var legacy_counter := str(meta.get("ctr", "")) != CTR_STANDARD
+	return _aes_ctr(ciphertext, derived_key, iv, legacy_counter)
 
 ## AES-CTR 模式加密/解密（对称操作）
-static func _aes_ctr(data: PackedByteArray, key: PackedByteArray, iv: PackedByteArray) -> PackedByteArray:
+## legacy_counter: 旧版逐字节相加、不进位的计数器，仅用于读取旧存档
+static func _aes_ctr(data: PackedByteArray, key: PackedByteArray, iv: PackedByteArray, legacy_counter: bool = false) -> PackedByteArray:
 	var result := PackedByteArray()
 	result.resize(data.size())
 	var block_count := (data.size() + 15) / 16
@@ -206,8 +212,11 @@ static func _aes_ctr(data: PackedByteArray, key: PackedByteArray, iv: PackedByte
 		var counter_block := iv.duplicate()
 		# 将块序号加到计数器的最后 4 字节
 		var n := block_idx
+		var carry := 0
 		for i in range(3, -1, -1):
-			counter_block[12 + i] = (counter_block[12 + i] + (n & 0xFF)) & 0xFF
+			var sum := counter_block[12 + i] + (n & 0xFF) + carry
+			counter_block[12 + i] = sum & 0xFF
+			carry = 0 if legacy_counter else sum >> 8
 			n >>= 8
 
 		# 用 ECB 模式加密计数器块，得到密钥流
@@ -266,8 +275,13 @@ static func _pkcs7_unpad(data: PackedByteArray) -> PackedByteArray:
 	if data.is_empty():
 		return data
 	var pad_len := int(data[data.size() - 1])
-	if pad_len <= 0 or pad_len > 16:
-		return data
+	if pad_len <= 0 or pad_len > 16 or pad_len > data.size() or data.size() % 16 != 0:
+		push_error("Encryptor: invalid PKCS#7 padding")
+		return PackedByteArray()
+	for i in range(data.size() - pad_len, data.size()):
+		if data[i] != pad_len:
+			push_error("Encryptor: invalid PKCS#7 padding")
+			return PackedByteArray()
 	return data.slice(0, data.size() - pad_len)
 
 ## 计算 HMAC-SHA256

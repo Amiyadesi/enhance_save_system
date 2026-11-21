@@ -64,7 +64,8 @@ func _migrate_one_version(working: Dictionary, version: int, modules: Array) -> 
 	if registered_result == null:
 		return null
 	var migrated := registered_result as Dictionary
-	_apply_module_migrations(migrated, modules, version)
+	if not _apply_module_migrations(migrated, modules, version):
+		return null
 	return migrated
 
 ## 调用已注册的全局迁移函数，并记录无效返回值。
@@ -80,16 +81,26 @@ func _apply_registered_migration(working: Dictionary, version: int) -> Variant:
 	return result
 
 ## 调用每个模块针对当前版本的 payload 迁移钩子。
-func _apply_module_migrations(working: Dictionary, modules: Array, version: int) -> void:
+## 模块数据或钩子返回值不是 Dictionary 时记录 last_error 并返回 false（整次迁移回滚）。
+func _apply_module_migrations(working: Dictionary, modules: Array, version: int) -> bool:
 	for module in modules:
 		if not (module is ISaveModule):
 			continue
 		var key: String = module.get_module_key()
 		if not working.has(key):
 			continue
-		var module_data: Dictionary = working[key]
-		var migrated_data: Dictionary = module.migrate_payload(module_data, version)
+		var module_data = working[key]
+		if not (module_data is Dictionary):
+			last_error = "Module '%s' data at version %d is not a Dictionary" % [key, version]
+			push_error("MigrationManager: " + last_error)
+			return false
+		var migrated_data = module.migrate_payload(module_data, version)
+		if not (migrated_data is Dictionary):
+			last_error = "Module '%s' migrate_payload for version %d returned invalid result" % [key, version]
+			push_error("MigrationManager: " + last_error)
+			return false
 		working[key] = migrated_data
+	return true
 
 ## 写入迁移完成后的目标存档版本号。
 func _write_meta_version(working: Dictionary, target_version: int) -> void:

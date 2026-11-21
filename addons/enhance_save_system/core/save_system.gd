@@ -22,6 +22,7 @@ extends Node
 ##  slot_load_failed(slot, reason)      槽位加载失败（含原因）
 ##  slot_backed_up(slot, backup_path)   槽位备份完成
 ##  save_migrated(slot, old_ver, new_ver) 存档迁移完成
+##  quit_save_failed(global_ok, slot_ok) quit_cleanly 存档失败、游戏未退出
 
 signal global_saved(ok: bool)
 signal global_loaded(ok: bool)
@@ -32,12 +33,14 @@ signal slot_changed(new_slot: int)
 signal slot_load_failed(slot: int, reason: String)
 signal slot_backed_up(slot: int, backup_path: String)
 signal save_migrated(slot: int, old_version: int, new_version: int)
+signal quit_save_failed(global_ok: bool, slot_ok: bool)
 
 # ──────────────────────────────────────────────
 # 配置
 # ──────────────────────────────────────────────
 
-@export var max_slots: int = 3
+const DEFAULT_MAX_SLOTS := 3
+@export var max_slots: int = DEFAULT_MAX_SLOTS
 @export var auto_register: bool = true
 @export var auto_load_global: bool = true
 @export var auto_load_slot: int = 0
@@ -45,7 +48,11 @@ signal save_migrated(slot: int, old_version: int, new_version: int)
 
 ## 自动存档
 @export var auto_save_enabled: bool = false
-@export var auto_save_interval: int = 300
+## 自动存档间隔（秒），最小 10
+const MIN_AUTO_SAVE_INTERVAL := 10
+@export var auto_save_interval: int = 300 :
+	set(v):
+		auto_save_interval = maxi(MIN_AUTO_SAVE_INTERVAL, v)
 @export var auto_save_slot: int = 1
 
 ## 存档预览图
@@ -77,15 +84,20 @@ signal save_migrated(slot: int, old_version: int, new_version: int)
 
 ## 模块注册配置
 @export var use_module_config: bool = true
-@export var module_config_path: String = "res://Config/save_modules.cfg"
+@export var module_config_path: String = DEFAULT_MODULE_CONFIG_PATH
 
 # ──────────────────────────────────────────────
 # 路径常量
 # ──────────────────────────────────────────────
 
-const _SAVE_DIR      := "user://saves"
+## 公开给编辑器面板等外部工具，避免各处重复硬编码
+const SAVE_DIR       := "user://saves"
+const SLOT_PATTERN   := "user://saves/slot_%02d.json"
+const DEFAULT_MODULE_CONFIG_PATH := "res://Config/save_modules.cfg"
+
+const _SAVE_DIR      := SAVE_DIR
 const _GLOBAL_PATH   := "user://saves/global.json"
-const _SLOT_PATTERN  := "user://saves/slot_%02d.json"
+const _SLOT_PATTERN  := SLOT_PATTERN
 const _SCREENSHOT_DIR := "user://saves/screenshots"
 const _SCREENSHOT_PATTERN := "user://saves/screenshots/slot_%02d.png"
 
@@ -103,6 +115,7 @@ var current_slot: int = 1 :
 		current_slot = clampi(v, 1, max_slots)
 
 var _auto_save_elapsed: float = 0.0
+var _register_serial: int = 0
 var _migration_manager: MigrationManager
 
 # ──────────────────────────────────────────────
@@ -165,7 +178,7 @@ func enable_auto_save(enabled: bool) -> void:
 
 ## Updates the auto-save cadence and clamps unsafe short intervals.
 func set_auto_save_interval(seconds: int) -> void:
-	auto_save_interval = max(10, seconds)
+	auto_save_interval = seconds
 	_auto_save_elapsed = minf(_auto_save_elapsed, float(auto_save_interval))
 
 # ──────────────────────────────────────────────
@@ -193,7 +206,9 @@ func _capture_screenshot(slot: int) -> void:
 	if not image:
 		return
 	image.resize(screenshot_width, screenshot_height)
-	image.save_png(screenshot_path)
+	var err := image.save_png(screenshot_path)
+	if err != OK:
+		push_warning("SaveSystem: failed to write screenshot '%s' (err=%d)" % [screenshot_path, err])
 
 ## Returns the user:// path for a slot preview image.
 func get_screenshot_path(slot: int) -> String:
@@ -211,20 +226,21 @@ func _screenshot_path(slot: int) -> String:
 func _auto_register_modules() -> void:
 	if not use_module_config:
 		return
-	for module in _load_config_modules():
-		register_module(module)
+	for entry in _load_config_modules():
+		register_module(entry["module"], entry["priority"])
 
 
-## Loads the explicit project module configuration.
+## Loads the explicit project module configuration as { module, priority } entries.
 func _load_config_modules() -> Array:
 	if not FileAccess.file_exists(module_config_path):
-		push_error("SaveSystem._auto_register_modules: module config not found '%s'" % module_config_path)
+		push_error("SaveSystem: module config not found '%s'. Create it (the editor plugin writes a starter file when the addon is enabled; see templates/save_modules.cfg.example), or set use_module_config = false and call register_module() yourself." % module_config_path)
 		return []
 	var registry := ModuleRegistry.new()
-	var modules := registry.load_from_config(module_config_path)
-	if modules.is_empty():
-		push_error("SaveSystem._auto_register_modules: module config loaded no modules '%s'" % module_config_path)
-	return modules
+	var entries := registry.load_entries_from_config(module_config_path)
+	# 一个还没登记任何模块的配置文件是合法的起始状态；登记了却一个都加载不出来才报错
+	if entries.is_empty() and registry.count_config_sections(module_config_path) != 0:
+		push_error("SaveSystem: module config '%s' loaded no modules" % module_config_path)
+	return entries
 
 ## 注册存档模块
 ## priority: 执行优先级，数值越小越先执行 collect_data / apply_data（默认 100）
@@ -233,7 +249,8 @@ func register_module(module: ISaveModule, priority: int = 100) -> void:
 	if key.is_empty():
 		push_error("SaveSystem.register_module: module key is empty")
 		return
-	var entry := { "module": module, "priority": priority }
+	_register_serial += 1
+	var entry := { "module": module, "priority": priority, "order": _register_serial }
 	if module.is_global():
 		_global_modules[key] = entry
 	else:
@@ -296,7 +313,11 @@ func _make_read_opts() -> SaveWriter.ReadOptions:
 ## 按 priority 升序排列模块数组
 func _sorted_modules(registry: Dictionary) -> Array:
 	var entries := registry.values()
-	entries.sort_custom(func(a, b): return a["priority"] < b["priority"])
+	# sort_custom 不稳定：priority 相同时按注册先后
+	entries.sort_custom(func(a, b):
+		if a["priority"] != b["priority"]:
+			return a["priority"] < b["priority"]
+		return a["order"] < b["order"])
 	var result: Array = []
 	for e in entries:
 		result.append(e["module"])
@@ -320,8 +341,10 @@ func load_global() -> bool:
 	global_loaded.emit(ok)
 	return ok
 
-## Marks a normal close, saves current state, and quits only after both writes succeed.
-func quit_cleanly() -> void:
+## Marks a normal close, saves current state, and quits after both writes succeed.
+## A failed save keeps the game open (so the player can retry) and emits quit_save_failed;
+## pass quit_on_save_failure = true to quit anyway.
+func quit_cleanly(quit_on_save_failure: bool = false) -> void:
 	var stats := get_module("stats")
 	if stats != null and "clean_exit" in stats:
 		stats.clean_exit = true
@@ -330,7 +353,11 @@ func quit_cleanly() -> void:
 	var slot_ok := true
 	if current_slot > 0 and slot_exists(current_slot):
 		slot_ok = save_slot(current_slot)
-	if global_ok and slot_ok and get_tree() != null:
+	var saved := global_ok and slot_ok
+	if not saved:
+		push_error("SaveSystem.quit_cleanly: save failed (global=%s, slot=%s)" % [global_ok, slot_ok])
+		quit_save_failed.emit(global_ok, slot_ok)
+	if (saved or quit_on_save_failure) and get_tree() != null:
 		get_tree().quit()
 
 # ──────────────────────────────────────────────
@@ -376,9 +403,26 @@ func _write_module_to_file(module: ISaveModule, path: String) -> bool:
 	# 如果文件不存在或解析失败，payload 为空；此时直接创建一个新 payload
 	if payload.is_empty():
 		payload = {}
+	elif not module.is_global():
+		# 重写会盖上当前格式版本，其余模块的旧数据必须先迁移（全局存档不走迁移）
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
 	# 更新当前模块对应的数据
 	payload[module.get_module_key()] = module.collect_data()
 	return SaveWriter.write_json(payload, path, opts)
+
+## Brings a slot payload read from disk up to the current format before it is rewritten,
+## so the fresh _meta.version never covers unmigrated module data. Returns {} on failure.
+func _migrate_for_rewrite(payload: Dictionary) -> Dictionary:
+	if not _migration_manager.needs_migration(payload, SaveWriter.FORMAT_VERSION):
+		return payload
+	var file_version := int((payload.get("_meta", {}) as Dictionary).get("version", 0))
+	var migrated := _migration_manager.migrate(payload, file_version, SaveWriter.FORMAT_VERSION, _sorted_modules(_slot_modules))
+	if not _migration_manager.last_error.is_empty():
+		push_error("SaveSystem: migration before rewrite failed: %s" % _migration_manager.last_error)
+		return {}
+	return migrated
 
 ## Applies one module payload from a save file when that key is present.
 func _read_module_from_file(module: ISaveModule, path: String) -> bool:
@@ -401,12 +445,14 @@ func save_slot(slot: int = -1) -> bool:
 	if not _valid(s):
 		return false
 	var modules := _sorted_modules(_slot_modules)
+	AtomicWriter.last_backup_path = ""
 	var ok := SaveWriter.write(modules, _slot_path(s), _make_write_opts())
 	if ok:
 		if save_screenshots_enabled:
 			_capture_screenshot(s)
-		if backup_enabled:
-			var bak_path := AtomicWriter.get_backup_path(_slot_path(s))
+		# 只有这次写入真的留下了 .bak 才通知（首次存档、备份改名失败时没有）
+		var bak_path := AtomicWriter.last_backup_path
+		if backup_enabled and not bak_path.is_empty() and FileAccess.file_exists(bak_path):
 			slot_backed_up.emit(s, bak_path)
 	slot_saved.emit(s, ok)
 	return ok
@@ -573,16 +619,40 @@ func new_game(slot: int = -1) -> void:
 # 导入 / 导出
 # ──────────────────────────────────────────────
 
-## Copies a slot save to an external path for manual backup or transfer.
+## Writes a slot to one self-contained external file for manual backup or transfer.
+## A split-module slot is merged into a single file; the preview image, when present,
+## is exported beside it as "<out_path basename>.png".
 func export_slot(slot: int, out_path: String) -> bool:
-	var src := _slot_path(_resolve_slot(slot))
+	var s := _resolve_slot(slot)
+	var src := _slot_path(s)
 	if not FileAccess.file_exists(src):
 		push_warning("SaveSystem.export_slot: slot %d not found" % slot)
 		return false
 	SaveWriter._ensure_dir(out_path)
-	return DirAccess.copy_absolute(src, out_path) == OK
+	var ok := false
+	if SaveWriter.peek_meta(src).get("split_modules", false):
+		var payload := SaveWriter.read_json(src, _make_read_opts())
+		if payload.is_empty() or _has_missing_split_modules(payload):
+			push_error("SaveSystem.export_slot: cannot read every module of split slot %d" % s)
+			return false
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
+		var opts := _make_write_opts()
+		opts.split_modules_enabled = false
+		opts.backup_enabled = false
+		opts.debug_pretty_json_dump_enabled = false
+		ok = SaveWriter.write_json(payload, out_path, opts)
+	else:
+		ok = DirAccess.copy_absolute(src, out_path) == OK
+	if ok and FileAccess.file_exists(_screenshot_path(s)):
+		var shot_err := DirAccess.copy_absolute(_screenshot_path(s), _export_screenshot_path(out_path))
+		if shot_err != OK:
+			push_warning("SaveSystem.export_slot: screenshot not exported (err=%d)" % shot_err)
+	return ok
 
-## Validates an external save file and copies it into the chosen slot.
+## Validates an external save file and installs it into the chosen slot.
+## With split_modules_enabled the payload is rewritten as split files; otherwise the file is copied.
 func import_slot(slot: int, in_path: String) -> bool:
 	if not _valid(slot):
 		return false
@@ -594,9 +664,42 @@ func import_slot(slot: int, in_path: String) -> bool:
 	if payload.is_empty():
 		push_error("SaveSystem.import_slot: invalid or unreadable save file '%s'" % in_path)
 		return false
+	var meta: Dictionary = payload.get("_meta", {})
+	if _has_missing_split_modules(payload):
+		push_error("SaveSystem.import_slot: '%s' is missing split module files %s" % [in_path, meta[SaveWriter.META_SPLIT_MISSING]])
+		return false
+	var has_module_data := false
+	for key in payload:
+		if not SaveWriter._is_reserved_key(key):
+			has_module_data = true
+			break
+	if meta.get("split_modules", false) and not has_module_data:
+		push_error("SaveSystem.import_slot: '%s' is a split-module main file without its module files; export it with export_slot() first" % in_path)
+		return false
 	var dst := _slot_path(slot)
 	SaveWriter._ensure_dir(dst)
-	return DirAccess.copy_absolute(in_path, dst) == OK
+	var ok := false
+	if split_modules_enabled or meta.get("split_modules", false):
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
+		ok = SaveWriter.write_json(payload, dst, _make_write_opts())
+	else:
+		ok = DirAccess.copy_absolute(in_path, dst) == OK
+	var shot := _export_screenshot_path(in_path)
+	if ok and FileAccess.file_exists(shot):
+		_ensure_screenshot_dir()
+		DirAccess.copy_absolute(shot, _screenshot_path(slot))
+	return ok
+
+## True when a split save's index names modules whose files could not be read.
+func _has_missing_split_modules(payload: Dictionary) -> bool:
+	var meta: Dictionary = payload.get("_meta", {})
+	return not (meta.get(SaveWriter.META_SPLIT_MISSING, []) as Array).is_empty()
+
+## Preview image path that travels with an exported save file.
+func _export_screenshot_path(save_path: String) -> String:
+	return save_path.get_basename() + ".png"
 
 # ──────────────────────────────────────────────
 # Debug

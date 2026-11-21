@@ -66,6 +66,8 @@ static func write_json(payload: Dictionary, path: String, opts: WriteOptions = n
 		opts = WriteOptions.new()
 
 	_ensure_dir(path)
+	# 从磁盘读回的 payload 带着旧的 _meta / _index；它们归写入器所有，任何编码路径都不能带上
+	payload = _without_reserved_keys(payload)
 	var effective_payload_format := _normalize_payload_format(opts.payload_format, opts.split_modules_enabled)
 
 	# 分模块文件模式
@@ -183,6 +185,7 @@ static func _decrypt_body_if_needed(meta: Dictionary, body: PackedByteArray, pat
 		"iv":         Marshalls.base64_to_raw(str(meta.get("iv",   ""))),
 		"tag":        Marshalls.base64_to_raw(str(meta.get("tag",  ""))),
 		"hmac":       Marshalls.base64_to_raw(str(meta.get("hmac", ""))),
+		"ctr":        str(meta.get("ctr", "")),
 	}
 	var decrypted := Encryptor.decrypt(dec_meta, encryption_key)
 	if decrypted.is_empty():
@@ -328,36 +331,40 @@ static func _write_split(payload: Dictionary, path: String, meta: Dictionary, op
 		var module_path := "%s_%s.json" % [base, key]
 		index[key] = module_path
 		var module_envelope := { "_meta": meta, key: payload[key] }
-		var module_text := JSON.stringify(module_envelope)
-		var module_data := module_text.to_utf8_buffer()
-		var f := FileAccess.open(module_path, FileAccess.WRITE)
-		if f == null:
+		var module_data := JSON.stringify(module_envelope).to_utf8_buffer()
+		if not _flush(module_data, module_path, opts):
 			push_error("SaveWriter: cannot write split module file '%s'" % module_path)
 			return false
-		f.store_buffer(module_data)
 
 	var main_envelope := { "_meta": meta, "_index": index }
 	var main_data := JSON.stringify(main_envelope).to_utf8_buffer()
 	return _flush(main_data, path, opts)
 
-static func _read_split(main_data: Dictionary, _path: String, _opts: ReadOptions) -> Dictionary:
+static func _read_split(main_data: Dictionary, path: String, _opts: ReadOptions) -> Dictionary:
 	var index: Dictionary = main_data.get("_index", {})
 	var result: Dictionary = { "_meta": main_data.get("_meta", {}) }
+	var base := path.get_basename()
+	var missing: Array = []
 	for key in index:
-		var module_path: String = index[key]
+		if _is_reserved_key(key):
+			continue
+		# 分文件与主文件同目录同前缀；主文件被复制/改名后索引里的旧路径不再可信
+		var module_path := "%s_%s.json" % [base, key]
+		if not FileAccess.file_exists(module_path):
+			module_path = str(index[key])
 		if not FileAccess.file_exists(module_path):
 			push_warning("SaveWriter: split module file not found '%s'" % module_path)
+			missing.append(key)
 			continue
-		var f := FileAccess.open(module_path, FileAccess.READ)
-		if f == null:
-			continue
-		var text := f.get_as_text()
-		var json := JSON.new()
-		if json.parse(text) != OK:
-			continue
-		var module_data = json.data
+		var module_data = JSON.parse_string(FileAccess.get_file_as_string(module_path))
 		if module_data is Dictionary and (module_data as Dictionary).has(key):
 			result[key] = (module_data as Dictionary)[key]
+		else:
+			push_warning("SaveWriter: split module file unreadable '%s'" % module_path)
+			missing.append(key)
+	# 索引里有、但读不出来的模块；需要完整数据的调用方（导入/导出）据此拒绝
+	if not missing.is_empty():
+		(result["_meta"] as Dictionary)[META_SPLIT_MISSING] = missing
 	return result
 
 ## Reads plain or legacy-XOR text JSON files for backward compatibility.
@@ -380,6 +387,8 @@ static func _read_legacy_text_json(raw: PackedByteArray, path: String, opts: Rea
 		return _read_legacy_xor_text_json(raw, path, opts.encryption_key, opts.payload_format_hint)
 
 	parsed["_meta"] = _decorate_meta(old_meta, _resolved_payload_format(old_meta, opts.payload_format_hint), _infer_text_storage_kind(old_meta))
+	if old_meta.get("split_modules", false) and parsed.has("_index"):
+		return _read_split(parsed, path, opts)
 	return parsed
 
 
@@ -433,6 +442,23 @@ static func _make_envelope(payload: Dictionary, meta: Dictionary) -> Dictionary:
 		envelope[key] = payload[key]
 	return envelope
 
+
+static func _without_reserved_keys(payload: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	for key in payload:
+		if not _is_reserved_key(key):
+			result[key] = payload[key]
+	return result
+
+
+## "_meta" / "_index" belong to the writer; a payload read back from disk still carries them.
+## 读取分模块存档时，索引中存在但未能读出的模块键列表（只出现在读出的 _meta 里，不会写盘）
+const META_SPLIT_MISSING := "split_missing"
+
+
+static func _is_reserved_key(key: Variant) -> bool:
+	return key is String and (key == "_meta" or key == "_index")
+
 ## Stores encryption parameters in metadata as base64 strings.
 static func _write_encryption_meta(meta: Dictionary, encrypted: Dictionary) -> void:
 	var iv: PackedByteArray  = encrypted.get("iv", PackedByteArray())
@@ -444,6 +470,8 @@ static func _write_encryption_meta(meta: Dictionary, encrypted: Dictionary) -> v
 		meta["tag"] = Marshalls.raw_to_base64(tag)
 	if not hmac.is_empty():
 		meta["hmac"] = Marshalls.raw_to_base64(hmac)
+	if encrypted.has("ctr"):
+		meta["ctr"] = encrypted["ctr"]
 
 ## 将数据写入文件（原子或直接）
 static func _flush(data: PackedByteArray, path: String, opts: WriteOptions) -> bool:

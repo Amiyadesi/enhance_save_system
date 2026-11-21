@@ -36,6 +36,35 @@ func load_from_config(config_path: String) -> Array:
 	_sort_entries_by_priority(entries)
 	return _instantiate_enabled_modules(entries)
 
+
+## 与 load_from_config 相同，但保留配置里的 priority
+## 返回按 priority 升序排列的 { "module": ISaveModule, "priority": int } 数组
+func load_entries_from_config(config_path: String) -> Array:
+	var cfg := ConfigFile.new()
+	var err := cfg.load(config_path)
+	if err != OK:
+		push_warning("ModuleRegistry: cannot load config '%s' (err=%d)" % [config_path, err])
+		return []
+
+	var entries := _load_entries(cfg)
+	_sort_entries_by_priority(entries)
+	var result: Array = []
+	for entry in entries:
+		if not entry.get("enabled", true):
+			continue
+		var module := _load_module(entry["path"], entry["section"])
+		if module != null:
+			result.append({ "module": module, "priority": entry["priority"] })
+	return result
+
+
+## 配置文件里声明的模块节数量（含禁用项）；文件无法读取时返回 -1
+func count_config_sections(config_path: String) -> int:
+	var cfg := ConfigFile.new()
+	if cfg.load(config_path) != OK:
+		return -1
+	return cfg.get_sections().size()
+
 # ──────────────────────────────────────────────
 # 内部工具
 # ──────────────────────────────────────────────
@@ -52,7 +81,13 @@ func _load_entries(cfg: ConfigFile) -> Array:
 
 ## 按 priority 升序整理模块条目，保持加载顺序可预测。
 func _sort_entries_by_priority(entries: Array) -> void:
-	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["priority"] < b["priority"])
+	# sort_custom 不稳定：priority 相同时按配置文件中的先后顺序
+	for i in range(entries.size()):
+		entries[i]["order"] = i
+	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["priority"] != b["priority"]:
+			return a["priority"] < b["priority"]
+		return a["order"] < b["order"])
 
 ## 实例化所有启用的模块，禁用条目保持静默跳过。
 func _instantiate_enabled_modules(entries: Array) -> Array:

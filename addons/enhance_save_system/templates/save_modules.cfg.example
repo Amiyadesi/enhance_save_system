@@ -1,0 +1,8 @@
+; Enhanced Save System — module registration
+; Copy to res://Config/save_modules.cfg (SaveSystem.module_config_path) and list your modules.
+; One section per module. Lower priority runs first in collect_data / apply_data.
+;
+; [player_module]
+; path = "res://addons/enhance_save_system_modules/Modules/player_module.gd"
+; enabled = true
+; priority = 20

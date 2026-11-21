@@ -183,6 +183,7 @@ static func _decrypt_body_if_needed(meta: Dictionary, body: PackedByteArray, pat
 		"iv":         Marshalls.base64_to_raw(str(meta.get("iv",   ""))),
 		"tag":        Marshalls.base64_to_raw(str(meta.get("tag",  ""))),
 		"hmac":       Marshalls.base64_to_raw(str(meta.get("hmac", ""))),
+		"ctr":        str(meta.get("ctr", "")),
 	}
 	var decrypted := Encryptor.decrypt(dec_meta, encryption_key)
 	if decrypted.is_empty():
@@ -458,6 +459,8 @@ static func _write_encryption_meta(meta: Dictionary, encrypted: Dictionary) -> v
 		meta["tag"] = Marshalls.raw_to_base64(tag)
 	if not hmac.is_empty():
 		meta["hmac"] = Marshalls.raw_to_base64(hmac)
+	if encrypted.has("ctr"):
+		meta["ctr"] = encrypted["ctr"]
 
 ## 将数据写入文件（原子或直接）
 static func _flush(data: PackedByteArray, path: String, opts: WriteOptions) -> bool:

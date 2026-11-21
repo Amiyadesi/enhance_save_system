@@ -53,6 +53,10 @@ Both variants support `save_modules.cfg`.
 
 The GDScript core does not scan addon-local modules. Projects own their module configuration and fail loudly when an enabled SaveSystem cannot load it. No project wrapper script is required.
 
+Enabling the addon in the editor writes a starter `res://Config/save_modules.cfg` (from `addons/enhance_save_system/templates/save_modules.cfg.example`) when the project has none; an existing file is never touched. A config with no module sections is a valid starting state. If you register modules only from code, set `use_module_config = false`.
+
+`priority` from the config is the priority the module is registered with, so config modules and modules added with `register_module(module, priority)` sort together. Equal priorities keep registration order.
+
 For exported games, include the cfg files in the export preset when you rely on explicit module ordering:
 
 - `Config/save_modules.cfg`
@@ -142,6 +146,13 @@ Add it to the relevant project-owned cfg. The core addons never scan or overwrit
 | Editor panel | View, delete, import, and export slots in the editor |
 | Input remapping UI | Authored scenes under `Components/InputRemapping` |
 
+Notes:
+
+- `export_slot()` writes one self-contained file: a split-module slot is merged, and the slot's preview image is written beside it as `<name>.png`. `import_slot()` validates the file, restores that image when present, and rewrites the slot as split files when `split_modules_enabled` is on.
+- The input remapping UI persists bindings through a module registered under the key `keybindings` (`addons/enhance_save_system_modules/Modules/keybinding_module.gd`). Without that module the UI still edits `InputMap` for the running session, but nothing is saved.
+- `quit_cleanly()` keeps the game open when the save fails and emits `quit_save_failed(global_ok, slot_ok)`; call `quit_cleanly(true)` to quit regardless.
+- `slot_backed_up` is emitted only when a `.bak` file was actually produced by that save.
+
 ## File Format
 
 Plain mode writes JSON with `_meta`.
@@ -154,13 +165,22 @@ Encrypted or compressed mode writes:
 
 The header keeps metadata readable for editor inspection. Old text JSON saves remain readable.
 
+## Version 2.0.1
+
+Fixes from the code review in issue #1:
+
+- `save_module()` now refreshes `_meta.saved_at`, and split mode no longer writes `slot_XX__meta.json` / `slot_XX__index.json` or drops sibling modules from the index. Split saves load back correctly.
+- AES-GCM mode now uses a standard big-endian CTR counter with carry. New saves carry `"ctr": "be32"` in `_meta`; saves without the marker are read with the previous counter, so existing encrypted saves still load. A 2.0.1 encrypted save cannot be read by 2.0.0.
+- AES-CBC rejects malformed PKCS#7 padding instead of returning the bytes unchanged.
+- `auto_save_interval` is clamped to 10 seconds or more wherever it is set, including the Inspector.
+
 ## Version 2.0
 
 See `addons/enhance_save_system/docs/migration_2_0.md` when updating from 1.1.1. Core updates no longer overwrite project data modules or module registration.
 
 ## Compatibility
 
-- Godot 4.6 tested in this repo.
+- Requires Godot 4.5 or newer (the module base classes use `@abstract`). Tested with Godot 4.6 in this repo.
 - GDScript addon is pure GDScript.
 - C# addon targets `Godot.NET.Sdk/4.7.0` in this standalone project; change the SDK version in the `.csproj` if your project uses another Godot 4.x Mono version.
 

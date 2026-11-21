@@ -11,14 +11,19 @@ extends RefCounted
 ##   var err := AtomicWriter.write("user://saves/slot_01.json", data_bytes)
 ##   var err := AtomicWriter.write("user://saves/slot_01.json", data_bytes, true)  # 启用备份
 
+## 最近一次 write() 生成的备份文件路径；没有生成备份（首次写入、未启用、改名失败）时为空
+static var last_backup_path: String = ""
+
 ## 原子写入
 ## path:           目标文件路径
 ## data:           要写入的字节数组
 ## backup_enabled: 是否在覆盖前保留旧文件为 .bak
 ## 返回 OK 表示成功，FAILED 表示失败（原文件不受影响）
+## 本次写入是否真的生成了 .bak，写完后用 last_backup_path 查询
 static func write(path: String, data: PackedByteArray, backup_enabled: bool = false) -> Error:
 	var tmp_path := get_tmp_path(path)
 	var bak_path := get_backup_path(path)
+	last_backup_path = ""
 
 	# 确保目录存在
 	_ensure_dir(path)
@@ -45,6 +50,8 @@ static func write(path: String, data: PackedByteArray, backup_enabled: bool = fa
 		if rename_err != OK:
 			push_warning("AtomicWriter: failed to rename '%s' to '%s' (err=%d)" % [path, bak_path, rename_err])
 			# 备份失败不中断写入，继续覆盖
+		else:
+			last_backup_path = bak_path
 
 	# 步骤 3：将临时文件重命名为目标文件（原子操作）
 	var final_err := DirAccess.rename_absolute(tmp_path, path)
@@ -53,6 +60,10 @@ static func write(path: String, data: PackedByteArray, backup_enabled: bool = fa
 		# 清理临时文件
 		if FileAccess.file_exists(tmp_path):
 			DirAccess.remove_absolute(tmp_path)
+		# 旧文件已被改名为 .bak 时放回原位，保证失败后原文件仍在
+		if not last_backup_path.is_empty() and not FileAccess.file_exists(path):
+			DirAccess.rename_absolute(bak_path, path)
+			last_backup_path = ""
 		return FAILED
 
 	return OK

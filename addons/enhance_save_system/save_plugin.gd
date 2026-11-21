@@ -18,9 +18,11 @@ var _pending_import_slot: int = -1
 var _pending_delete_slot: int = -1
 var _pending_delete_path: String = ""
 
-const _SAVE_DIR     := "user://saves"
-const _SLOT_PATTERN := "user://saves/slot_%02d.json"
-const _MAX_SLOTS    := 8
+const SAVE_SYSTEM_SCRIPT := preload("res://addons/enhance_save_system/core/save_system.gd")
+const MODULE_CONFIG_TEMPLATE := "templates/save_modules.cfg.example"
+
+const _SAVE_DIR     := SAVE_SYSTEM_SCRIPT.SAVE_DIR
+const _SLOT_PATTERN := SAVE_SYSTEM_SCRIPT.SLOT_PATTERN
 
 # Tracks the active plugin instance for plugin-path lookup.
 func _init() -> void:
@@ -30,6 +32,7 @@ func _init() -> void:
 # Creates the authored bottom panel and starts the first slot scan.
 func _enter_tree() -> void:
 	_register_save_system_autoload()
+	_ensure_module_config()
 	_editor_panel = EDITOR_PANEL_SCENE.instantiate() as Control
 	_bind_editor_panel()
 	add_control_to_bottom_panel(_editor_panel, "存档管理")
@@ -48,6 +51,20 @@ func _exit_tree() -> void:
 func _register_save_system_autoload() -> void:
 	if not ProjectSettings.has_setting("autoload/%s" % AUTOLOAD_NAME):
 		add_autoload_singleton(AUTOLOAD_NAME, get_plugin_path().path_join(AUTOLOAD_PATH))
+
+
+# Writes a starter module config so a freshly enabled addon does not start with an error.
+# Never touches an existing project config.
+func _ensure_module_config() -> void:
+	var config_path: String = SAVE_SYSTEM_SCRIPT.DEFAULT_MODULE_CONFIG_PATH
+	if FileAccess.file_exists(config_path):
+		return
+	var template_path := get_plugin_path().path_join(MODULE_CONFIG_TEMPLATE)
+	if not FileAccess.file_exists(template_path):
+		return
+	DirAccess.make_dir_recursive_absolute(config_path.get_base_dir())
+	if DirAccess.copy_absolute(template_path, config_path) == OK:
+		print("SavePlugin: created starter module config '%s'" % config_path)
 
 
 # Removes only the autoload owned by this addon when it is disabled.
@@ -113,7 +130,8 @@ func _refresh_slot_list() -> void:
 	var root_item := _slot_tree.create_item()
 
 	var found := 0
-	for i in range(1, _MAX_SLOTS + 1):
+	var slot_count := _editor_slot_count()
+	for i in range(1, slot_count + 1):
 		var path := _SLOT_PATTERN % i
 		var exists := FileAccess.file_exists(path)
 
@@ -128,7 +146,21 @@ func _refresh_slot_list() -> void:
 		found += 1
 		_populate_saved_slot_item(item, path)
 
-	_set_status("共 %d 个存档（最多 %d 槽）" % [found, _MAX_SLOTS])
+	_set_status("共 %d 个存档（显示 %d 槽）" % [found, slot_count])
+
+
+# The editor cannot see the runtime max_slots, so show the default range plus any higher slot on disk.
+func _editor_slot_count() -> int:
+	var count: int = SAVE_SYSTEM_SCRIPT.DEFAULT_MAX_SLOTS
+	var dir := DirAccess.open(_SAVE_DIR)
+	if dir == null:
+		return count
+	for file_name in dir.get_files():
+		if file_name.begins_with("slot_") and file_name.get_extension() == "json":
+			var number := file_name.get_basename().trim_prefix("slot_")
+			if number.is_valid_int():
+				count = maxi(count, number.to_int())
+	return count
 
 
 # Writes the placeholder columns for an empty save slot.
@@ -210,7 +242,13 @@ func _on_export_file_selected(dst: String) -> void:
 	if _pending_export_path.is_empty():
 		_set_status("没有可导出的槽位")
 		return
-	var ok := DirAccess.copy_absolute(_pending_export_path, dst) == OK
+	var ok := false
+	if SaveWriter.peek_meta(_pending_export_path).get("split_modules", false):
+		# 分模块存档合并为单个文件再导出（分文件是明文 JSON，不需要密钥）
+		var payload := SaveWriter.read_json(_pending_export_path)
+		ok = not payload.is_empty() and SaveWriter.write_json(payload, dst)
+	else:
+		ok = DirAccess.copy_absolute(_pending_export_path, dst) == OK
 	_set_status("导出%s：%s" % ["成功" if ok else "失败", dst])
 	_pending_export_path = ""
 
@@ -219,6 +257,17 @@ func _on_export_file_selected(dst: String) -> void:
 func _on_import_file_selected(src: String) -> void:
 	if _pending_import_slot < 0:
 		_set_status("没有可导入的目标槽位")
+		return
+	# 与 SaveSystem.import_slot 一致：不是可识别的存档文件就拒绝（编辑器没有密钥，只校验文件头）
+	var info := SaveWriter.inspect_file(src)
+	var meta := info.get("meta", {}) as Dictionary
+	if meta.is_empty():
+		_set_status("导入失败：不是有效的存档文件：%s" % src)
+		_pending_import_slot = -1
+		return
+	if meta.get("split_modules", false):
+		_set_status("导入失败：这是分模块存档的主文件，请先用 SaveSystem.export_slot() 导出")
+		_pending_import_slot = -1
 		return
 	var dst := _SLOT_PATTERN % _pending_import_slot
 	_ensure_save_dir()

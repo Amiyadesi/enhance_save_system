@@ -66,6 +66,8 @@ static func write_json(payload: Dictionary, path: String, opts: WriteOptions = n
 		opts = WriteOptions.new()
 
 	_ensure_dir(path)
+	# 从磁盘读回的 payload 带着旧的 _meta / _index；它们归写入器所有，任何编码路径都不能带上
+	payload = _without_reserved_keys(payload)
 	var effective_payload_format := _normalize_payload_format(opts.payload_format, opts.split_modules_enabled)
 
 	# 分模块文件模式
@@ -326,8 +328,6 @@ static func _write_split(payload: Dictionary, path: String, meta: Dictionary, op
 	var index: Dictionary = {}
 
 	for key in payload:
-		if _is_reserved_key(key):
-			continue
 		var module_path := "%s_%s.json" % [base, key]
 		index[key] = module_path
 		var module_envelope := { "_meta": meta, key: payload[key] }
@@ -438,10 +438,16 @@ static func _build_meta(opts: WriteOptions, payload_format: String) -> Dictionar
 static func _make_envelope(payload: Dictionary, meta: Dictionary) -> Dictionary:
 	var envelope: Dictionary = { "_meta": meta }
 	for key in payload:
-		if _is_reserved_key(key):
-			continue
 		envelope[key] = payload[key]
 	return envelope
+
+
+static func _without_reserved_keys(payload: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	for key in payload:
+		if not _is_reserved_key(key):
+			result[key] = payload[key]
+	return result
 
 
 ## "_meta" / "_index" belong to the writer; a payload read back from disk still carries them.

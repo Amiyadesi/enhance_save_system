@@ -403,9 +403,26 @@ func _write_module_to_file(module: ISaveModule, path: String) -> bool:
 	# 如果文件不存在或解析失败，payload 为空；此时直接创建一个新 payload
 	if payload.is_empty():
 		payload = {}
+	elif not module.is_global():
+		# 重写会盖上当前格式版本，其余模块的旧数据必须先迁移（全局存档不走迁移）
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
 	# 更新当前模块对应的数据
 	payload[module.get_module_key()] = module.collect_data()
 	return SaveWriter.write_json(payload, path, opts)
+
+## Brings a slot payload read from disk up to the current format before it is rewritten,
+## so the fresh _meta.version never covers unmigrated module data. Returns {} on failure.
+func _migrate_for_rewrite(payload: Dictionary) -> Dictionary:
+	if not _migration_manager.needs_migration(payload, SaveWriter.FORMAT_VERSION):
+		return payload
+	var file_version := int((payload.get("_meta", {}) as Dictionary).get("version", 0))
+	var migrated := _migration_manager.migrate(payload, file_version, SaveWriter.FORMAT_VERSION, _sorted_modules(_slot_modules))
+	if not _migration_manager.last_error.is_empty():
+		push_error("SaveSystem: migration before rewrite failed: %s" % _migration_manager.last_error)
+		return {}
+	return migrated
 
 ## Applies one module payload from a save file when that key is present.
 func _read_module_from_file(module: ISaveModule, path: String) -> bool:
@@ -618,6 +635,9 @@ func export_slot(slot: int, out_path: String) -> bool:
 		if payload.is_empty() or _has_missing_split_modules(payload):
 			push_error("SaveSystem.export_slot: cannot read every module of split slot %d" % s)
 			return false
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
 		var opts := _make_write_opts()
 		opts.split_modules_enabled = false
 		opts.backup_enabled = false
@@ -660,6 +680,9 @@ func import_slot(slot: int, in_path: String) -> bool:
 	SaveWriter._ensure_dir(dst)
 	var ok := false
 	if split_modules_enabled or meta.get("split_modules", false):
+		payload = _migrate_for_rewrite(payload)
+		if payload.is_empty():
+			return false
 		ok = SaveWriter.write_json(payload, dst, _make_write_opts())
 	else:
 		ok = DirAccess.copy_absolute(in_path, dst) == OK
